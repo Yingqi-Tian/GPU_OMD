@@ -62,19 +62,6 @@ __constant__ double ftstar_0[10]={  9.8358038584295893E-01, 3.2350961342244944E-
                                     7.3662188798711586E-02, 6.3790298825366104E-02, 5.6250578797778041E-02,\
                                     5.0304150615127878E-02};
 
-static __device__ void Ft_fs_0(int j,double T,double * R){
-    if(T==0.0){
-        R[0]=1.0;
-    }
-    else{
-        double rsqrt_T=rsqrtf(T);
-        double sqrt_t=T*rsqrt_T;
-        double erf_t=erf(sqrt_t);
-        erf_t=erf_t*SQRT_PI*rsqrt_T;
-        R[0]=0.5*erf_t;
-    }
-};
-
 static __device__ void Ft_fs_1(int j,double T,double * R){
     if(T==0.0){
         R[0]=1.0;
@@ -84,22 +71,118 @@ static __device__ void Ft_fs_1(int j,double T,double * R){
     }
     else{
 	double e=exp(-T);
-    if(T<0.1){
-        double temp=1;
-        R[j]=temp*i2_inv[j];
-        for(int i=1;i<=2;i++){
-            temp=temp*(-1)*T*i_inv[i];
-            R[j]=R[j]+temp*i2_inv[i+j];
+    if(T<0.01){
+        double temp;
+        R[1]=3.3333333333333331E-01;
+        temp=T;
+        R[1]-=temp*2.0000000000000001E-01;
+        temp*=T;
+        R[1]+=temp*7.1428571428571425E-02;
+        temp*=T;
+        R[1]-=temp*3.7037037037037035E-02;
+        temp*=T;
+        R[1]+=temp*2.2727272727272728E-02;
+        temp*=T;
+        R[1]-=temp*1.5384615384615385E-02;
+        R[0]=2*T*R[1]+e;
+	/*	
+        for(int i=1;i<=4;i++){
+            temp=temp*(-1)*T*i_inv[i];///(double)i;
+            R[j]=R[j]+temp*i2_inv[i+j];///(2*(double)(i+j)+1);
         }
         for(int jj=j-1;jj>=0;jj--){
-            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];
+            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];///(2*(double)(jj)+1);
         }
+	*/
     }
     else{
         double rsqrt_T=rsqrtf(T);
         double sqrt_t=T*rsqrt_T;
         double erf_t=erf(sqrt_t);
-        double T_inv=rsqrt_T*rsqrt_T;
+        double T_inv=1/T;
+        erf_t=erf_t*SQRT_PI*rsqrt_T;
+        R[0]=0.5*erf_t;
+		double tmp_sum=1.0;
+		double T_inv_i=0.5;
+		double T_i=T;
+		for(int i=1;i<=j;i++){
+			T_inv_i*=T_inv;
+			R[i]=T_inv_i*(erf_t*C_i[i]-e*tmp_sum);
+			tmp_sum=tmp_sum*(i+0.5)+T_i;
+			T_i*=T;
+		}
+	}
+    }
+};
+
+
+static __device__ void Ft_fs_2(int j,double T,double * R){
+    if(T==0.0){
+        R[0]=1.0;
+        for(int i=1;i<=j;i++){
+            R[i]=i2_inv[i];
+        }
+    }
+    else{
+	double e=exp(-T);
+    if(T<0.15){
+        double temp=1;
+        R[2]=2.0E-01;
+        temp=T;
+        R[2]-=temp*1.4285714285714285E-01;
+        temp*=T;
+        R[2]+=temp*5.5555555555555552E-02;
+        temp*=T;
+        R[2]-=temp*3.0303030303030304E-02;
+        temp*=T;
+        R[2]+=temp*1.9230769230769232E-02;
+        temp*=T;
+        R[2]-=temp*1.3333333333333334E-02;
+        temp*=T;
+        R[2]+=temp*9.8039215686274508E-03;
+        temp*=T;
+        R[2]-=temp*7.5187969924812026E-03;
+        temp*=T;
+        R[2]+=temp*5.9523809523809521E-03;
+        R[1]=2*T*R[2]+e;
+        R[1]*=3.3333333333333331E-01;
+        R[0]=2*T*R[1]+e;
+		/*
+        R[2]=0.2;//temp/(2*(double)(j)+1);
+	temp=T;
+	R[2]-=temp*1.4285714285714285E-01;
+	temp*=T;
+	R[2]+=temp*0.5*1.1111111111111110E-01;
+	temp*=T;
+	R[2]-=temp*3.3333333333333333E-01*9.0909090909090909E-02;
+	temp*=T;
+	R[2]+=temp*0.25*7.6923076923076927E-02;
+	temp*=T;
+	R[2]-=temp*0.2*6.6666666666666666E-02;
+	temp*=T;
+	R[2]+=temp*1.6666666666666667E-01*5.8823529411764705E-02;
+	temp*=T;
+	R[2]-=temp*1.4285714285714285E-01*5.2631578947368418E-02;
+	temp*=T;
+	R[2]+=temp*0.125*4.7619047619047616E-02;
+	R[1]=(2*T*R[2]+e)*3.3333333333333331E-01;
+	R[0]=2*T*R[1]+e;*/
+        /*
+ 	R[j]=temp/(2*(double)(j)+1);        
+	for(int i=1;i<=8;i++){
+            temp=temp*(-1)*T/(double)i;
+            R[j]=R[j]+temp/(2*(double)(i+j)+1);
+        }
+        for(int jj=j-1;jj>=0;jj--){
+            R[jj]=(2*T*R[jj+1]+e)/(2*(double)(jj)+1);
+        }
+	*/
+    }
+    else{
+        double rsqrt_T=rsqrtf(T);
+        double sqrt_t=T*rsqrt_T;
+        double erf_t=erf(sqrt_t);
+        double T_inv=1/T;
         erf_t=erf_t*SQRT_PI*rsqrt_T;
         R[0]=0.5*erf_t;
 		double tmp_sum=1.0;
@@ -124,22 +207,80 @@ static __device__ void Ft_fs_3(int j,double T,double * R){
     }
     else{
 	double e=exp(-T);
-    if(T<0.3){
+    if(T<0.44){
         double temp=1;
-        R[j]=temp*i2_inv[j];
-        for(int i=1;i<=6;i++){
-            temp=temp*(-1)*T*i_inv[i];
-            R[j]=R[j]+temp*i2_inv[i+j];
+        R[3]=1.4285714285714285E-01;
+        temp=T;
+        R[3]-=temp*1.1111111111111110E-01;
+        temp*=T;
+        R[3]+=temp*4.5454545454545456E-02;
+        temp*=T;
+        R[3]-=temp*2.5641025641025640E-02;
+        temp*=T;
+        R[3]+=temp*1.6666666666666666E-02;
+        temp*=T;
+        R[3]-=temp*1.1764705882352941E-02;
+        temp*=T;
+        R[3]+=temp*8.7719298245614030E-03;
+        temp*=T;
+        R[3]-=temp*6.8027210884353739E-03;
+        temp*=T;
+        R[3]+=temp*5.4347826086956520E-03;
+        temp*=T;
+        R[3]-=temp*4.4444444444444444E-03;
+        temp*=T;
+        R[3]+=temp*3.7037037037037038E-03;
+        temp*=T;
+        R[3]-=temp*3.1347962382445140E-03;
+        R[2]=2*T*R[3]+e;
+        R[2]*=2.0000000000000001E-01;
+        R[1]=2*T*R[2]+e;
+        R[1]*=3.3333333333333331E-01;
+        R[0]=2*T*R[1]+e;
+		/*
+        R[3]=1.4285714285714285E-01;//temp/(2*(double)(j)+1);
+	temp=T;
+	R[3]-=temp*1.1111111111111110E-01;
+	temp*=T;
+	R[3]+=temp*0.5*9.0909090909090909E-02;
+	temp*=T;
+	R[3]-=temp*3.3333333333333333E-01*7.6923076923076927E-02;
+	temp*=T;
+	R[3]+=temp*0.25*6.6666666666666666E-02;
+	temp*=T;
+	R[3]-=temp*0.2*5.8823529411764705E-02;
+	temp*=T;
+	R[3]+=temp*1.6666666666666667E-01*5.2631578947368418E-02;
+	temp*=T;
+	R[3]-=temp*1.4285714285714285E-01*4.7619047619047616E-02;
+	temp*=T;
+	R[3]+=temp*0.125*4.3478260869565216E-02;
+	temp*=T;
+	R[3]+=temp*1.1111111111111110E-01*4.0000000000000001E-02;
+	temp*=T;
+	R[3]-=temp*1.0E-01*3.7037037037037035E-02;
+	temp*=T;
+	R[3]+=temp*9.0909090909090912E-02*3.4482758620689655E-02;
+    
+	R[2]=(2*T*R[3]+e)*2.0E-01;
+	R[1]=(2*T*R[2]+e)*3.3333333333333331E-01;
+	R[0]=2*T*R[1]+e;*/
+    /*
+        R[j]=temp/(2*(double)(j)+1);
+        for(int i=1;i<=11;i++){
+            temp=temp*(-1)*T/(double)i;
+            R[j]=R[j]+temp/(2*(double)(i+j)+1);
         }
         for(int jj=j-1;jj>=0;jj--){
-            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];
+            R[jj]=(2*T*R[jj+1]+e)/(2*(double)(jj)+1);
         }
+    */
     }
     else{
         double rsqrt_T=rsqrtf(T);
         double sqrt_t=T*rsqrt_T;
         double erf_t=erf(sqrt_t);
-        double T_inv=rsqrt_T*rsqrt_T;
+        double T_inv=1/T;
         erf_t=erf_t*SQRT_PI*rsqrt_T;
         R[0]=0.5*erf_t;
 		double tmp_sum=1.0;
@@ -164,22 +305,92 @@ static __device__ void Ft_fs_4(int j,double T,double * R){
     }
     else{
 	double e=exp(-T);
-    if(T<0.7){
+    if(T<0.84){
         double temp=1;
-        R[j]=temp*i2_inv[j];
-        for(int i=1;i<=10;i++){
-            temp=temp*(-1)*T*i_inv[i];
-            R[j]=R[j]+temp*i2_inv[i+j];
+        R[4]=1.1111111111111110E-01;
+        temp=T;
+        R[4]-=temp*9.0909090909090912E-02;
+        temp*=T;
+        R[4]+=temp*3.8461538461538464E-02;
+        temp*=T;
+        R[4]-=temp*2.2222222222222223E-02;
+        temp*=T;
+        R[4]+=temp*1.4705882352941176E-02;
+        temp*=T;
+        R[4]-=temp*1.0526315789473684E-02;
+        temp*=T;
+        R[4]+=temp*7.9365079365079361E-03;
+        temp*=T;
+        R[4]-=temp*6.2111801242236021E-03;
+        temp*=T;
+        R[4]+=temp*5.0000000000000001E-03;
+        temp*=T;
+        R[4]-=temp*4.1152263374485600E-03;
+        temp*=T;
+        R[4]+=temp*3.4482758620689655E-03;
+        temp*=T;
+        R[4]-=temp*2.9325513196480938E-03;
+        temp*=T;
+        R[4]+=temp*2.5252525252525255E-03;
+        temp*=T;
+        R[4]-=temp*2.1978021978021978E-03;
+        temp*=T;
+        R[4]+=temp*1.9305019305019305E-03;
+        R[3]=2*T*R[4]+e;
+        R[3]*=1.4285714285714285E-01;
+        R[2]=2*T*R[3]+e;
+        R[2]*=2.0000000000000001E-01;
+        R[1]=2*T*R[2]+e;
+        R[1]*=3.3333333333333331E-01;
+        R[0]=2*T*R[1]+e;
+		/*
+        R[4]=1.4285714285714285E-01;//temp/(2*(double)(j)+1);
+	temp=T;
+	R[4]-=temp*9.0909090909090909E-02;
+	temp*=T;
+	R[4]+=temp*0.5*7.6923076923076927E-02;
+	temp*=T;
+	R[4]-=temp*3.3333333333333333E-01*6.6666666666666666E-02;
+	temp*=T;
+	R[4]+=temp*0.25*5.8823529411764705E-02;
+	temp*=T;
+	R[4]-=temp*0.2*5.2631578947368418E-02;
+	temp*=T;
+	R[4]+=temp*1.6666666666666667E-01*4.7619047619047616E-02;
+	temp*=T;
+	R[4]-=temp*1.4285714285714285E-01*4.3478260869565216E-02;
+	temp*=T;
+	R[4]+=temp*0.125*4.0000000000000001E-02;
+	temp*=T;
+	R[4]+=temp*1.1111111111111110E-01*3.7037037037037035E-02;
+	temp*=T;
+	R[4]-=temp*1.0E-01*3.4482758620689655E-02;
+	temp*=T;
+	R[4]+=temp*9.0909090909090912E-02*3.2258064516129031E-02;
+	temp*=T;
+	R[4]-=temp*8.3333333333333333E-02*3.0303030303030304E-02;
+	temp*=T;
+	R[4]+=temp*7.6923076923076923E-02*2.8571428571428571E-02;
+    
+	R[3]=(2*T*R[3]+e)*1.4285714285714285E-01;
+	R[2]=(2*T*R[3]+e)*2.0E-01;
+	R[1]=(2*T*R[2]+e)*3.3333333333333331E-01;
+	R[0]=2*T*R[1]+e;*/
+    /*
+        R[j]=temp/(2*(double)(j)+1);
+        for(int i=1;i<=13;i++){
+            temp=temp*(-1)*T/(double)i;
+            R[j]=R[j]+temp/(2*(double)(i+j)+1);
         }
         for(int jj=j-1;jj>=0;jj--){
-            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];
-        }
+            R[jj]=(2*T*R[jj+1]+e)/(2*(double)(jj)+1);
+        }*/
     }
     else{
         double rsqrt_T=rsqrtf(T);
         double sqrt_t=T*rsqrt_T;
         double erf_t=erf(sqrt_t);
-        double T_inv=rsqrt_T*rsqrt_T;
+        double T_inv=1/T;
         erf_t=erf_t*SQRT_PI*rsqrt_T;
         R[0]=0.5*erf_t;
 		double tmp_sum=1.0;
@@ -204,22 +415,67 @@ static __device__ void Ft_fs_5(int j,double T,double * R){
     }
     else{
 	double e=exp(-T);
-    if(T<0.9){
+    if(T<1.30){
         double temp=1;
-        R[j]=temp*i2_inv[j];
-        for(int i=1;i<=12;i++){
-            temp=temp*(-1)*T*i_inv[i];
-            R[j]=R[j]+temp*i2_inv[i+j];
+        R[5]=9.0909090909090912E-02;
+        temp=T;
+        R[5]-=temp*7.6923076923076927E-02;
+        temp*=T;
+        R[5]+=temp*3.3333333333333333E-02;
+        temp*=T;
+        R[5]-=temp*1.9607843137254902E-02;
+        temp*=T;
+        R[5]+=temp*1.3157894736842105E-02;
+        temp*=T;
+        R[5]-=temp*9.5238095238095247E-03;
+        temp*=T;
+        R[5]+=temp*7.2463768115942030E-03;
+        temp*=T;
+        R[5]-=temp*5.7142857142857143E-03;
+        temp*=T;
+        R[5]+=temp*4.6296296296296294E-03;
+        temp*=T;
+        R[5]-=temp*3.8314176245210726E-03;
+        temp*=T;
+        R[5]+=temp*3.2258064516129032E-03;
+        temp*=T;
+        R[5]-=temp*2.7548209366391185E-03;
+        temp*=T;
+        R[5]+=temp*2.3809523809523812E-03;
+        temp*=T;
+        R[5]-=temp*2.0790020790020791E-03;
+        temp*=T;
+        R[5]+=temp*1.8315018315018315E-03;
+        temp*=T;
+        R[5]-=temp*1.6260162601626016E-03;
+        temp*=T;
+        R[5]+=temp*1.4534883720930232E-03;
+        temp*=T;
+        R[5]-=temp*1.3071895424836600E-03;
+        R[4]=2*T*R[5]+e;
+        R[4]*=1.1111111111111110E-01;
+        R[3]=2*T*R[4]+e;
+        R[3]*=1.4285714285714285E-01;
+        R[2]=2*T*R[3]+e;
+        R[2]*=2.0000000000000001E-01;
+        R[1]=2*T*R[2]+e;
+        R[1]*=3.3333333333333331E-01;
+        R[0]=2*T*R[1]+e;
+		/*
+        R[j]=temp/(2*(double)(j)+1);
+        for(int i=1;i<=16;i++){
+            temp=temp*(-1)*T/(double)i;
+            R[j]=R[j]+temp/(2*(double)(i+j)+1);
         }
         for(int jj=j-1;jj>=0;jj--){
-            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];
-        }
+            R[jj]=(2*T*R[jj+1]+e)/(2*(double)(jj)+1);
+        }*/
     }
     else{
         double rsqrt_T=rsqrtf(T);
         double sqrt_t=T*rsqrt_T;
         double erf_t=erf(sqrt_t);
-        double T_inv=rsqrt_T*rsqrt_T;
+        double T_inv=1/T;
         erf_t=erf_t*SQRT_PI*rsqrt_T;
         R[0]=0.5*erf_t;
 		double tmp_sum=1.0;
@@ -244,22 +500,73 @@ static __device__ void Ft_fs_6(int j,double T,double * R){
     }
     else{
 	double e=exp(-T);
-    if(T<1.3){
+    if(T<1.80){
         double temp=1;
-        R[j]=temp*i2_inv[j];
-        for(int i=1;i<=15;i++){
-            temp=temp*(-1)*T*i_inv[i];
-            R[j]=R[j]+temp*i2_inv[i+j];
+        R[6]=7.6923076923076927E-02;
+        temp=T;
+        R[6]-=temp*6.6666666666666666E-02;
+        temp*=T;
+        R[6]+=temp*2.9411764705882353E-02;
+        temp*=T;
+        R[6]-=temp*1.7543859649122806E-02;
+        temp*=T;
+        R[6]+=temp*1.1904761904761904E-02;
+        temp*=T;
+        R[6]-=temp*8.6956521739130436E-03;
+        temp*=T;
+        R[6]+=temp*6.6666666666666671E-03;
+        temp*=T;
+        R[6]-=temp*5.2910052910052907E-03;
+        temp*=T;
+        R[6]+=temp*4.3103448275862068E-03;
+        temp*=T;
+        R[6]-=temp*3.5842293906810036E-03;
+        temp*=T;
+        R[6]+=temp*3.0303030303030303E-03;
+        temp*=T;
+        R[6]-=temp*2.5974025974025974E-03;
+        temp*=T;
+        R[6]+=temp*2.2522522522522522E-03;
+        temp*=T;
+        R[6]-=temp*1.9723865877712033E-03;
+        temp*=T;
+        R[6]+=temp*1.7421602787456446E-03;
+        temp*=T;
+        R[6]-=temp*1.5503875968992248E-03;
+        temp*=T;
+        R[6]+=temp*1.3888888888888889E-03;
+        temp*=T;
+        R[6]-=temp*1.2515644555694619E-03;
+        temp*=T;
+        R[6]+=temp*1.1337868480725624E-03;
+        temp*=T;
+        R[6]-=temp*1.0319917440660474E-03;
+        R[5]=2*T*R[6]+e;
+        R[5]*=9.0909090909090912E-02;
+        R[4]=2*T*R[5]+e;
+        R[4]*=1.1111111111111110E-01;
+        R[3]=2*T*R[4]+e;
+        R[3]*=1.4285714285714285E-01;
+        R[2]=2*T*R[3]+e;
+        R[2]*=2.0000000000000001E-01;
+        R[1]=2*T*R[2]+e;
+        R[1]*=3.3333333333333331E-01;
+        R[0]=2*T*R[1]+e;
+        /*
+        R[j]=temp/(2*(double)(j)+1);
+        for(int i=1;i<=18;i++){
+            temp=temp*(-1)*T/(double)i;
+            R[j]=R[j]+temp/(2*(double)(i+j)+1);
         }
         for(int jj=j-1;jj>=0;jj--){
-            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];
-        }
+            R[jj]=(2*T*R[jj+1]+e)/(2*(double)(jj)+1);
+        }*/
     }
     else{
         double rsqrt_T=rsqrtf(T);
         double sqrt_t=T*rsqrt_T;
         double erf_t=erf(sqrt_t);
-        double T_inv=rsqrt_T*rsqrt_T;
+        double T_inv=1/T;
         erf_t=erf_t*SQRT_PI*rsqrt_T;
         R[0]=0.5*erf_t;
 		double tmp_sum=1.0;
@@ -284,22 +591,81 @@ static __device__ void Ft_fs_7(int j,double T,double * R){
     }
     else{
 	double e=exp(-T);
-    if(T<1.5){
+    if(T<2.33){
         double temp=1;
-        R[j]=temp*i2_inv[j];
-        for(int i=1;i<=17;i++){
-            temp=temp*(-1)*T*i_inv[i];
-            R[j]=R[j]+temp*i2_inv[i+j];
+        R[7]=6.6666666666666666E-02;
+        temp=T;
+        R[7]-=temp*5.8823529411764705E-02;
+        temp*=T;
+        R[7]+=temp*2.6315789473684209E-02;
+        temp*=T;
+        R[7]-=temp*1.5873015873015872E-02;
+        temp*=T;
+        R[7]+=temp*1.0869565217391304E-02;
+        temp*=T;
+        R[7]-=temp*8.0000000000000002E-03;
+        temp*=T;
+        R[7]+=temp*6.1728395061728392E-03;
+        temp*=T;
+        R[7]-=temp*4.9261083743842365E-03;
+        temp*=T;
+        R[7]+=temp*4.0322580645161289E-03;
+        temp*=T;
+        R[7]-=temp*3.3670033670033669E-03;
+        temp*=T;
+        R[7]+=temp*2.8571428571428571E-03;
+        temp*=T;
+        R[7]-=temp*2.4570024570024569E-03;
+        temp*=T;
+        R[7]+=temp*2.1367521367521370E-03;
+        temp*=T;
+        R[7]-=temp*1.8761726078799250E-03;
+        temp*=T;
+        R[7]+=temp*1.6611295681063123E-03;
+        temp*=T;
+        R[7]-=temp*1.4814814814814814E-03;
+        temp*=T;
+        R[7]+=temp*1.3297872340425532E-03;
+        temp*=T;
+        R[7]-=temp*1.2004801920768306E-03;
+        temp*=T;
+        R[7]+=temp*1.0893246187363835E-03;
+        temp*=T;
+        R[7]-=temp*9.9304865938430980E-04;
+        temp*=T;
+        R[7]+=temp*9.0909090909090909E-04;
+        temp*=T;
+        R[7]-=temp*8.3542188805346695E-04;
+        temp*=T;
+        R[7]+=temp*7.7041602465331282E-04;
+        R[6]=2*T*R[7]+e;
+        R[6]*=7.6923076923076927E-02;
+        R[5]=2*T*R[6]+e;
+        R[5]*=9.0909090909090912E-02;
+        R[4]=2*T*R[5]+e;
+        R[4]*=1.1111111111111110E-01;
+        R[3]=2*T*R[4]+e;
+        R[3]*=1.4285714285714285E-01;
+        R[2]=2*T*R[3]+e;
+        R[2]*=2.0000000000000001E-01;
+        R[1]=2*T*R[2]+e;
+        R[1]*=3.3333333333333331E-01;
+        R[0]=2*T*R[1]+e;
+        /*
+        R[j]=temp/(2*(double)(j)+1);
+        for(int i=1;i<=21;i++){
+            temp=temp*(-1)*T/(double)i;
+            R[j]=R[j]+temp/(2*(double)(i+j)+1);
         }
         for(int jj=j-1;jj>=0;jj--){
-            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];
-        }
+            R[jj]=(2*T*R[jj+1]+e)/(2*(double)(jj)+1);
+        }*/
     }
     else{
         double rsqrt_T=rsqrtf(T);
         double sqrt_t=T*rsqrt_T;
         double erf_t=erf(sqrt_t);
-        double T_inv=rsqrt_T*rsqrt_T;
+        double T_inv=1/T;
         erf_t=erf_t*SQRT_PI*rsqrt_T;
         R[0]=0.5*erf_t;
 		double tmp_sum=1.0;
@@ -324,22 +690,87 @@ static __device__ void Ft_fs_8(int j,double T,double * R){
     }
     else{
 	double e=exp(-T);
-    if(T<2.7){
+    if(T<2.89){
         double temp=1;
-        R[j]=temp*i2_inv[j];
+        R[8]=5.8823529411764705E-02;
+        temp=T;
+        R[8]-=temp*5.2631578947368418E-02;
+        temp*=T;
+        R[8]+=temp*2.3809523809523808E-02;
+        temp*=T;
+        R[8]-=temp*1.4492753623188406E-02;
+        temp*=T;
+        R[8]+=temp*1.0000000000000000E-02;
+        temp*=T;
+        R[8]-=temp*7.4074074074074077E-03;
+        temp*=T;
+        R[8]+=temp*5.7471264367816091E-03;
+        temp*=T;
+        R[8]-=temp*4.6082949308755760E-03;
+        temp*=T;
+        R[8]+=temp*3.7878787878787880E-03;
+        temp*=T;
+        R[8]-=temp*3.1746031746031746E-03;
+        temp*=T;
+        R[8]+=temp*2.7027027027027029E-03;
+        temp*=T;
+        R[8]-=temp*2.3310023310023310E-03;
+        temp*=T;
+        R[8]+=temp*2.0325203252032522E-03;
+        temp*=T;
+        R[8]-=temp*1.7889087656529517E-03;
+        temp*=T;
+        R[8]+=temp*1.5873015873015873E-03;
+        temp*=T;
+        R[8]-=temp*1.4184397163120568E-03;
+        temp*=T;
+        R[8]+=temp*1.2755102040816326E-03;
+        temp*=T;
+        R[8]-=temp*1.1534025374855825E-03;
+        temp*=T;
+        R[8]+=temp*1.0482180293501049E-03;
+        temp*=T;
+        R[8]-=temp*9.5693779904306223E-04;
+        temp*=T;
+        R[8]+=temp*8.7719298245614037E-04;
+        temp*=T;
+        R[8]-=temp*8.0710250201775622E-04;
+        temp*=T;
+        R[8]+=temp*7.4515648286140089E-04;
+        temp*=T;
+        R[8]-=temp*6.9013112491373362E-04;
+        temp*=T;
+        R[8]+=temp*6.4102564102564103E-04;
+        R[7]=2*T*R[8]+e;
+        R[7]*=6.6666666666666666E-02;
+        R[6]=2*T*R[7]+e;
+        R[6]*=7.6923076923076927E-02;
+        R[5]=2*T*R[6]+e;
+        R[5]*=9.0909090909090912E-02;
+        R[4]=2*T*R[5]+e;
+        R[4]*=1.1111111111111110E-01;
+        R[3]=2*T*R[4]+e;
+        R[3]*=1.4285714285714285E-01;
+        R[2]=2*T*R[3]+e;
+        R[2]*=2.0000000000000001E-01;
+        R[1]=2*T*R[2]+e;
+        R[1]*=3.3333333333333331E-01;
+        R[0]=2*T*R[1]+e;
+        /*
+        R[j]=temp/(2*(double)(j)+1);
         for(int i=1;i<=23;i++){
-            temp=temp*(-1)*T*i_inv[i];
-            R[j]=R[j]+temp*i2_inv[i+j];
+            temp=temp*(-1)*T/(double)i;
+            R[j]=R[j]+temp/(2*(double)(i+j)+1);
         }
         for(int jj=j-1;jj>=0;jj--){
-            R[jj]=(2*T*R[jj+1]+e)*i2_inv[jj];
-        }
+            R[jj]=(2*T*R[jj+1]+e)/(2*(double)(jj)+1);
+        }*/
     }
     else{
         double rsqrt_T=rsqrtf(T);
         double sqrt_t=T*rsqrt_T;
         double erf_t=erf(sqrt_t);
-        double T_inv=rsqrt_T*rsqrt_T;
+        double T_inv=1/T;
         erf_t=erf_t*SQRT_PI*rsqrt_T;
         R[0]=0.5*erf_t;
 		double tmp_sum=1.0;
@@ -352,6 +783,19 @@ static __device__ void Ft_fs_8(int j,double T,double * R){
 			T_i*=T;
 		}
 	}
+    }
+};
+
+static __device__ void Ft_fs_0(int j,double T,double * R){
+    if(T==0.0){
+        R[0]=1.0;
+    }
+    else{
+        double rsqrt_T=rsqrtf(T);
+        double sqrt_t=T*rsqrt_T;
+        double erf_t=erf(sqrt_t);
+        erf_t=erf_t*SQRT_PI*rsqrt_T;
+        R[0]=0.5*erf_t;
     }
 };
 
