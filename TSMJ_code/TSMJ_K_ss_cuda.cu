@@ -1,0 +1,20474 @@
+#include<math.h>
+#include"Boys_gpu.h"
+#define PI 3.1415926535897932
+#define P25 17.4934183276248620
+#define NTHREAD 64
+
+texture<int2,1,cudaReadModeElementType> tex_P;
+texture<int2,1,cudaReadModeElementType> tex_Zta;
+texture<int2,1,cudaReadModeElementType> tex_pp;
+texture<float,1,cudaReadModeElementType> tex_K2_p;
+texture<int2,1,cudaReadModeElementType> tex_PA;
+texture<int2,1,cudaReadModeElementType> tex_PB;
+texture<unsigned int,1,cudaReadModeElementType> tex_id_bra;
+texture<int2,1,cudaReadModeElementType> tex_Q;
+texture<int2,1,cudaReadModeElementType> tex_Eta;
+texture<int2,1,cudaReadModeElementType> tex_pq;
+texture<float,1,cudaReadModeElementType> tex_K2_q;
+texture<int2,1,cudaReadModeElementType> tex_QC;
+texture<int2,1,cudaReadModeElementType> tex_QD;
+texture<unsigned int,1,cudaReadModeElementType> tex_id_ket;
+
+void TSMJ_texture_binding_bra_ss(double * P_d,double * PA_d,double * PB_d,\
+        double * alphaP_d,double * pp_d,float * K2_p_d,unsigned int * id_bra_d,\
+        unsigned int primit_len){
+    cudaBindTexture(0, tex_P, P_d, sizeof(double)*primit_len*3);
+    cudaBindTexture(0, tex_Zta, alphaP_d, sizeof(double)*primit_len);
+    cudaBindTexture(0, tex_pp, pp_d, sizeof(double)*primit_len);
+    cudaBindTexture(0, tex_K2_p, K2_p_d, sizeof(float)*primit_len);
+    cudaBindTexture(0, tex_PA, PA_d, sizeof(double)*primit_len*3);
+    cudaBindTexture(0, tex_PB, PB_d, sizeof(double)*primit_len*3);
+    cudaBindTexture(0, tex_id_bra, id_bra_d, sizeof(unsigned int)*primit_len);
+
+}
+void TSMJ_texture_unbind_bra_ss(){
+    cudaUnbindTexture(tex_P);
+    cudaUnbindTexture(tex_Zta);
+    cudaUnbindTexture(tex_pp);
+    cudaUnbindTexture(tex_K2_p);
+    cudaUnbindTexture(tex_PA);
+    cudaUnbindTexture(tex_PB);
+    cudaUnbindTexture(tex_id_bra);
+
+}
+
+void TSMJ_texture_binding_ket_ss(double * Q_d,double * QC_d,double * QD_d,\
+        double * alphaQ_d,double * pq_d,float * K2_q_d,unsigned int * id_ket_d,\
+        unsigned int primit_len){
+    cudaBindTexture(0, tex_Q, Q_d, sizeof(double)*primit_len*3);
+    cudaBindTexture(0, tex_Eta, alphaQ_d, sizeof(double)*primit_len);
+    cudaBindTexture(0, tex_pq, pq_d, sizeof(double)*primit_len);
+    cudaBindTexture(0, tex_K2_q, K2_q_d, sizeof(float)*primit_len);
+    cudaBindTexture(0, tex_QC, QC_d, sizeof(double)*primit_len*3);
+    cudaBindTexture(0, tex_QD, QD_d, sizeof(double)*primit_len*3);
+    cudaBindTexture(0, tex_id_ket, id_ket_d, sizeof(unsigned int)*primit_len);
+
+}
+void TSMJ_texture_unbind_ket_ss(){
+    cudaUnbindTexture(tex_Q);
+    cudaUnbindTexture(tex_Eta);
+    cudaUnbindTexture(tex_pq);
+    cudaUnbindTexture(tex_K2_q);
+    cudaUnbindTexture(tex_QC);
+    cudaUnbindTexture(tex_QD);
+    cudaUnbindTexture(tex_id_ket);
+
+}
+__global__ void TSMJ_Kp_ssss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+				double PR_000000000000=R_000[0];
+			ans_temp[ans_id*1+0]+=PR_000000000000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ssss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+				double QR_000000000000=R_000[0];
+			ans_temp[ans_id*1+0]+=QR_000000000000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ssss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+				double PR_000000000000=R_000[0];
+			ans_temp[ans_id*1+0]+=PR_000000000000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ssss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+				double QR_000000000000=R_000[0];
+			ans_temp[ans_id*1+0]+=QR_000000000000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ssss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+			ans_temp[ans_id*1+0]+=R_000[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ssss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+			ans_temp[ans_id*1+0]+=R_000[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ssss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+			ans_temp[ans_id*1+0]+=R_000[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ssss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        if(i_contrc_bra>j_contrc_ket){
+            if(tId_x==0){
+                for(int ians=0;ians<1;ians++){
+                    ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=0.0;
+                }
+            }
+            continue;
+        }
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=2*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double T=alphaT*((PX-QX)*(PX-QX)+(PY-QY)*(PY-QY)+(PZ-QZ)*(PZ-QZ));
+                double R_000[1];
+                Ft_fs_0(0,T,R_000);
+                R_000[0]*=lmd;
+			ans_temp[ans_id*1+0]+=R_000[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_spss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	double P_001000000=PD_001[0];
+	double P_000001000=PD_001[1];
+	double P_000000001=PD_001[2];
+				double PR_001000000000=P_001000000*R_000[0]+-1*R_100[0];
+				double PR_000001000000=P_000001000*R_000[0]+-1*R_010[0];
+				double PR_000000001000=P_000000001*R_000[0]+-1*R_001[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_001000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_000001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000000001000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_spss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+	double P_001000000=PD_001[0];
+	double P_000001000=PD_001[1];
+	double P_000000001=PD_001[2];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_001000000*QR_000000000000+QR_000000000100);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_000001000*QR_000000000000+QR_000000000010);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000000001*QR_000000000000+QR_000000000001);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_spss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+		double Pd_101[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+	double P_001000000=Pd_001[0];
+	double P_101000000=Pd_101[0];
+	double P_000001000=Pd_001[1];
+	double P_000101000=Pd_101[1];
+	double P_000000001=Pd_001[2];
+	double P_000000101=Pd_101[2];
+				double PR_001000000000=P_001000000*R_000[0]+-1*P_101000000*R_100[0];
+				double PR_000001000000=P_000001000*R_000[0]+-1*P_000101000*R_010[0];
+				double PR_000000001000=P_000000001*R_000[0]+-1*P_000000101*R_001[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_001000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_000001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000000001000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_spss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+		double Pd_101[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+	double P_001000000=Pd_001[0];
+	double P_101000000=Pd_101[0];
+	double P_000001000=Pd_001[1];
+	double P_000101000=Pd_101[1];
+	double P_000000001=Pd_001[2];
+	double P_000000101=Pd_101[2];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_001000000*QR_000000000000+P_101000000*QR_000000000100);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_000001000*QR_000000000000+P_000101000*QR_000000000010);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000000001*QR_000000000000+P_000000101*QR_000000000001);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_spss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_001000000;
+			double P_000001000;
+			double P_000000001;
+			P_001000000=Pd_001[0];
+			P_000001000=Pd_001[1];
+			P_000000001=Pd_001[2];
+			double PR_001000000000=P_001000000*R_000[0]+aPin1*R_100[0];
+			double PR_000001000000=P_000001000*R_000[0]+aPin1*R_010[0];
+			double PR_000000001000=P_000000001*R_000[0]+aPin1*R_001[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_001000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_000001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000000001000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_spss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_001000000;
+			double P_000001000;
+			double P_000000001;
+			P_001000000=Pd_001[0];
+			P_000001000=Pd_001[1];
+			P_000000001=Pd_001[2];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_001000000*R_000[0]+aPin1*R_100[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_000001000*R_000[0]+aPin1*R_010[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000000001*R_000[0]+aPin1*R_001[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_spss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_001000000;
+			double P_000001000;
+			double P_000000001;
+			P_001000000=PD_001[0];
+			P_000001000=PD_001[1];
+			P_000000001=PD_001[2];
+			double PR_001000000000=P_001000000*R_000[0]+R_100[0];
+			double PR_000001000000=P_000001000*R_000[0]+R_010[0];
+			double PR_000000001000=P_000000001*R_000[0]+R_001[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_001000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_000001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000000001000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_spss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_001000000;
+			double P_000001000;
+			double P_000000001;
+			P_001000000=PD_001[0];
+			P_000001000=PD_001[1];
+			P_000000001=PD_001[2];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_001000000*R_000[0]+R_100[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_000001000*R_000[0]+R_010[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000000001*R_000[0]+R_001[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_sdss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_002[3];
+		double PD_102[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=PD_001[i]+PD_001[i];
+			}
+	double P_002000000=PD_002[0];
+	double P_102000000=PD_102[0];
+	double P_001001000=PD_001[0]*PD_001[1];
+	double P_001101000=PD_001[0];
+	double P_101001000=PD_001[1];
+	double P_000002000=PD_002[1];
+	double P_000102000=PD_102[1];
+	double P_001000001=PD_001[0]*PD_001[2];
+	double P_001000101=PD_001[0];
+	double P_101000001=PD_001[2];
+	double P_000001001=PD_001[1]*PD_001[2];
+	double P_000001101=PD_001[1];
+	double P_000101001=PD_001[2];
+	double P_000000002=PD_002[2];
+	double P_000000102=PD_102[2];
+				double PR_002000000000=P_002000000*R_000[0]+-1*P_102000000*R_100[0]+R_200[0];
+				double PR_001001000000=P_001001000*R_000[0]+-1*P_001101000*R_010[0]+-1*P_101001000*R_100[0]+R_110[0];
+				double PR_000002000000=P_000002000*R_000[0]+-1*P_000102000*R_010[0]+R_020[0];
+				double PR_001000001000=P_001000001*R_000[0]+-1*P_001000101*R_001[0]+-1*P_101000001*R_100[0]+R_101[0];
+				double PR_000001001000=P_000001001*R_000[0]+-1*P_000001101*R_001[0]+-1*P_000101001*R_010[0]+R_011[0];
+				double PR_000000002000=P_000000002*R_000[0]+-1*P_000000102*R_001[0]+R_002[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_002000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_001001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000002000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(PR_001000001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(PR_000001001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(PR_000000002000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_sdss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+		double PD_002[3];
+		double PD_102[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=PD_001[i]+PD_001[i];
+			}
+	double P_002000000=PD_002[0];
+	double P_102000000=PD_102[0];
+	double P_001001000=PD_001[0]*PD_001[1];
+	double P_001101000=PD_001[0];
+	double P_101001000=PD_001[1];
+	double P_000002000=PD_002[1];
+	double P_000102000=PD_102[1];
+	double P_001000001=PD_001[0]*PD_001[2];
+	double P_001000101=PD_001[0];
+	double P_101000001=PD_001[2];
+	double P_000001001=PD_001[1]*PD_001[2];
+	double P_000001101=PD_001[1];
+	double P_000101001=PD_001[2];
+	double P_000000002=PD_002[2];
+	double P_000000102=PD_102[2];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_002000000*QR_000000000000+P_102000000*QR_000000000100+QR_000000000200);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_001001000*QR_000000000000+P_001101000*QR_000000000010+P_101001000*QR_000000000100+QR_000000000110);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000002000*QR_000000000000+P_000102000*QR_000000000010+QR_000000000020);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(P_001000001*QR_000000000000+P_001000101*QR_000000000001+P_101000001*QR_000000000100+QR_000000000101);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(P_000001001*QR_000000000000+P_000001101*QR_000000000001+P_000101001*QR_000000000010+QR_000000000011);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(P_000000002*QR_000000000000+P_000000102*QR_000000000001+QR_000000000002);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_sdss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_101[3];
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_202[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=aPin1*(2.000000*Pd_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_202[i]=aPin1*(Pd_101[i]);
+			}
+	double P_002000000=Pd_002[0];
+	double P_102000000=Pd_102[0];
+	double P_202000000=Pd_202[0];
+	double P_001001000=Pd_001[0]*Pd_001[1];
+	double P_001101000=Pd_001[0]*Pd_101[1];
+	double P_101001000=Pd_101[0]*Pd_001[1];
+	double P_101101000=Pd_101[0]*Pd_101[1];
+	double P_000002000=Pd_002[1];
+	double P_000102000=Pd_102[1];
+	double P_000202000=Pd_202[1];
+	double P_001000001=Pd_001[0]*Pd_001[2];
+	double P_001000101=Pd_001[0]*Pd_101[2];
+	double P_101000001=Pd_101[0]*Pd_001[2];
+	double P_101000101=Pd_101[0]*Pd_101[2];
+	double P_000001001=Pd_001[1]*Pd_001[2];
+	double P_000001101=Pd_001[1]*Pd_101[2];
+	double P_000101001=Pd_101[1]*Pd_001[2];
+	double P_000101101=Pd_101[1]*Pd_101[2];
+	double P_000000002=Pd_002[2];
+	double P_000000102=Pd_102[2];
+	double P_000000202=Pd_202[2];
+				double PR_002000000000=P_002000000*R_000[0]+-1*P_102000000*R_100[0]+P_202000000*R_200[0];
+				double PR_001001000000=P_001001000*R_000[0]+-1*P_001101000*R_010[0]+-1*P_101001000*R_100[0]+P_101101000*R_110[0];
+				double PR_000002000000=P_000002000*R_000[0]+-1*P_000102000*R_010[0]+P_000202000*R_020[0];
+				double PR_001000001000=P_001000001*R_000[0]+-1*P_001000101*R_001[0]+-1*P_101000001*R_100[0]+P_101000101*R_101[0];
+				double PR_000001001000=P_000001001*R_000[0]+-1*P_000001101*R_001[0]+-1*P_000101001*R_010[0]+P_000101101*R_011[0];
+				double PR_000000002000=P_000000002*R_000[0]+-1*P_000000102*R_001[0]+P_000000202*R_002[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_002000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_001001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000002000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(PR_001000001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(PR_000001001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(PR_000000002000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_sdss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+		double Pd_101[3];
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_202[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=aPin1*(2.000000*Pd_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_202[i]=aPin1*(Pd_101[i]);
+			}
+	double P_002000000=Pd_002[0];
+	double P_102000000=Pd_102[0];
+	double P_202000000=Pd_202[0];
+	double P_001001000=Pd_001[0]*Pd_001[1];
+	double P_001101000=Pd_001[0]*Pd_101[1];
+	double P_101001000=Pd_101[0]*Pd_001[1];
+	double P_101101000=Pd_101[0]*Pd_101[1];
+	double P_000002000=Pd_002[1];
+	double P_000102000=Pd_102[1];
+	double P_000202000=Pd_202[1];
+	double P_001000001=Pd_001[0]*Pd_001[2];
+	double P_001000101=Pd_001[0]*Pd_101[2];
+	double P_101000001=Pd_101[0]*Pd_001[2];
+	double P_101000101=Pd_101[0]*Pd_101[2];
+	double P_000001001=Pd_001[1]*Pd_001[2];
+	double P_000001101=Pd_001[1]*Pd_101[2];
+	double P_000101001=Pd_101[1]*Pd_001[2];
+	double P_000101101=Pd_101[1]*Pd_101[2];
+	double P_000000002=Pd_002[2];
+	double P_000000102=Pd_102[2];
+	double P_000000202=Pd_202[2];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_002000000*QR_000000000000+P_102000000*QR_000000000100+P_202000000*QR_000000000200);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_001001000*QR_000000000000+P_001101000*QR_000000000010+P_101001000*QR_000000000100+P_101101000*QR_000000000110);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000002000*QR_000000000000+P_000102000*QR_000000000010+P_000202000*QR_000000000020);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(P_001000001*QR_000000000000+P_001000101*QR_000000000001+P_101000001*QR_000000000100+P_101000101*QR_000000000101);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(P_000001001*QR_000000000000+P_000001101*QR_000000000001+P_000101001*QR_000000000010+P_000101101*QR_000000000011);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(P_000000002*QR_000000000000+P_000000102*QR_000000000001+P_000000202*QR_000000000002);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_sdss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_002[3];
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+			double P_002000000;
+			double P_001001000;
+			double P_000002000;
+			double P_001000001;
+			double P_000001001;
+			double P_000000002;
+			double a1P_001000000_1;
+			double a1P_001000000_2;
+			double a1P_000001000_1;
+			double a1P_000001000_2;
+			double a1P_000000001_1;
+			double a1P_000000001_2;
+			P_002000000=Pd_002[0];
+			P_001001000=Pd_001[0]*Pd_001[1];
+			P_000002000=Pd_002[1];
+			P_001000001=Pd_001[0]*Pd_001[2];
+			P_000001001=Pd_001[1]*Pd_001[2];
+			P_000000002=Pd_002[2];
+			a1P_001000000_1=Pd_001[0];
+			a1P_001000000_2=2*a1P_001000000_1;
+			a1P_000001000_1=Pd_001[1];
+			a1P_000001000_2=2*a1P_000001000_1;
+			a1P_000000001_1=Pd_001[2];
+			a1P_000000001_2=2*a1P_000000001_1;
+			double PR_002000000000=P_002000000*R_000[0]+a1P_001000000_2*R_100[0]+aPin2*R_200[0];
+			double PR_001001000000=P_001001000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000001000_1*R_100[0]+aPin2*R_110[0];
+			double PR_000002000000=P_000002000*R_000[0]+a1P_000001000_2*R_010[0]+aPin2*R_020[0];
+			double PR_001000001000=P_001000001*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000001_1*R_100[0]+aPin2*R_101[0];
+			double PR_000001001000=P_000001001*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000001_1*R_010[0]+aPin2*R_011[0];
+			double PR_000000002000=P_000000002*R_000[0]+a1P_000000001_2*R_001[0]+aPin2*R_002[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_002000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_001001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000002000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(PR_001000001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(PR_000001001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(PR_000000002000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_sdss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_002[3];
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+			double P_002000000;
+			double P_001001000;
+			double P_000002000;
+			double P_001000001;
+			double P_000001001;
+			double P_000000002;
+			double a1P_001000000_1;
+			double a1P_001000000_2;
+			double a1P_000001000_1;
+			double a1P_000001000_2;
+			double a1P_000000001_1;
+			double a1P_000000001_2;
+			P_002000000=Pd_002[0];
+			P_001001000=Pd_001[0]*Pd_001[1];
+			P_000002000=Pd_002[1];
+			P_001000001=Pd_001[0]*Pd_001[2];
+			P_000001001=Pd_001[1]*Pd_001[2];
+			P_000000002=Pd_002[2];
+			a1P_001000000_1=Pd_001[0];
+			a1P_001000000_2=2*a1P_001000000_1;
+			a1P_000001000_1=Pd_001[1];
+			a1P_000001000_2=2*a1P_000001000_1;
+			a1P_000000001_1=Pd_001[2];
+			a1P_000000001_2=2*a1P_000000001_1;
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_002000000*R_000[0]+a1P_001000000_2*R_100[0]+aPin2*R_200[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_001001000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000001000_1*R_100[0]+aPin2*R_110[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000002000*R_000[0]+a1P_000001000_2*R_010[0]+aPin2*R_020[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(P_001000001*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000001_1*R_100[0]+aPin2*R_101[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(P_000001001*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000001_1*R_010[0]+aPin2*R_011[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(P_000000002*R_000[0]+a1P_000000001_2*R_001[0]+aPin2*R_002[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_sdss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_002[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+			double P_002000000;
+			double P_001001000;
+			double P_000002000;
+			double P_001000001;
+			double P_000001001;
+			double P_000000002;
+			double a1P_001000000_1;
+			double a1P_001000000_2;
+			double a1P_000001000_1;
+			double a1P_000001000_2;
+			double a1P_000000001_1;
+			double a1P_000000001_2;
+			P_002000000=PD_002[0];
+			P_001001000=PD_001[0]*PD_001[1];
+			P_000002000=PD_002[1];
+			P_001000001=PD_001[0]*PD_001[2];
+			P_000001001=PD_001[1]*PD_001[2];
+			P_000000002=PD_002[2];
+			a1P_001000000_1=PD_001[0];
+			a1P_001000000_2=2*a1P_001000000_1;
+			a1P_000001000_1=PD_001[1];
+			a1P_000001000_2=2*a1P_000001000_1;
+			a1P_000000001_1=PD_001[2];
+			a1P_000000001_2=2*a1P_000000001_1;
+			double PR_002000000000=P_002000000*R_000[0]+a1P_001000000_2*R_100[0]+R_200[0];
+			double PR_001001000000=P_001001000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000001000_1*R_100[0]+R_110[0];
+			double PR_000002000000=P_000002000*R_000[0]+a1P_000001000_2*R_010[0]+R_020[0];
+			double PR_001000001000=P_001000001*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000001_1*R_100[0]+R_101[0];
+			double PR_000001001000=P_000001001*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000001_1*R_010[0]+R_011[0];
+			double PR_000000002000=P_000000002*R_000[0]+a1P_000000001_2*R_001[0]+R_002[0];
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(PR_002000000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(PR_001001000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(PR_000002000000);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(PR_001000001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(PR_000001001000);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(PR_000000002000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_sdss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*1];
+    for(int i=0;i<1;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_002[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+			double P_002000000;
+			double P_001001000;
+			double P_000002000;
+			double P_001000001;
+			double P_000001001;
+			double P_000000002;
+			double a1P_001000000_1;
+			double a1P_001000000_2;
+			double a1P_000001000_1;
+			double a1P_000001000_2;
+			double a1P_000000001_1;
+			double a1P_000000001_2;
+			P_002000000=PD_002[0];
+			P_001001000=PD_001[0]*PD_001[1];
+			P_000002000=PD_002[1];
+			P_001000001=PD_001[0]*PD_001[2];
+			P_000001001=PD_001[1]*PD_001[2];
+			P_000000002=PD_002[2];
+			a1P_001000000_1=PD_001[0];
+			a1P_001000000_2=2*a1P_001000000_1;
+			a1P_000001000_1=PD_001[1];
+			a1P_000001000_2=2*a1P_000001000_1;
+			a1P_000000001_1=PD_001[2];
+			a1P_000000001_2=2*a1P_000000001_1;
+			ans_temp[ans_id*1+0]+=Pmtrx[0]*(P_002000000*R_000[0]+a1P_001000000_2*R_100[0]+R_200[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[1]*(P_001001000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000001000_1*R_100[0]+R_110[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[2]*(P_000002000*R_000[0]+a1P_000001000_2*R_010[0]+R_020[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[3]*(P_001000001*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000001_1*R_100[0]+R_101[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[4]*(P_000001001*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000001_1*R_010[0]+R_011[0]);
+			ans_temp[ans_id*1+0]+=Pmtrx[5]*(P_000000002*R_000[0]+a1P_000000001_2*R_001[0]+R_002[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<1;ians++){
+                    ans_temp[tId_x*1+ians]+=ans_temp[(tId_x+num_thread)*1+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<1;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*1+ians]=ans_temp[(tId_x)*1+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_psss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	double P_010000000=PD_010[0];
+	double P_000010000=PD_010[1];
+	double P_000000010=PD_010[2];
+				double PR_010000000000=P_010000000*R_000[0]+-1*R_100[0];
+				double PR_000010000000=P_000010000*R_000[0]+-1*R_010[0];
+				double PR_000000010000=P_000000010*R_000[0]+-1*R_001[0];
+			ans_temp[ans_id*3+0]+=PR_010000000000;
+			ans_temp[ans_id*3+1]+=PR_000010000000;
+			ans_temp[ans_id*3+2]+=PR_000000010000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_psss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+	double P_010000000=PD_010[0];
+	double P_000010000=PD_010[1];
+	double P_000000010=PD_010[2];
+			ans_temp[ans_id*3+0]+=P_010000000*QR_000000000000+QR_000000000100;
+			ans_temp[ans_id*3+1]+=P_000010000*QR_000000000000+QR_000000000010;
+			ans_temp[ans_id*3+2]+=P_000000010*QR_000000000000+QR_000000000001;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_psss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+		double Pd_110[3];
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+	double P_010000000=Pd_010[0];
+	double P_110000000=Pd_110[0];
+	double P_000010000=Pd_010[1];
+	double P_000110000=Pd_110[1];
+	double P_000000010=Pd_010[2];
+	double P_000000110=Pd_110[2];
+				double PR_010000000000=P_010000000*R_000[0]+-1*P_110000000*R_100[0];
+				double PR_000010000000=P_000010000*R_000[0]+-1*P_000110000*R_010[0];
+				double PR_000000010000=P_000000010*R_000[0]+-1*P_000000110*R_001[0];
+			ans_temp[ans_id*3+0]+=PR_010000000000;
+			ans_temp[ans_id*3+1]+=PR_000010000000;
+			ans_temp[ans_id*3+2]+=PR_000000010000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_psss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+		double Pd_110[3];
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+	double P_010000000=Pd_010[0];
+	double P_110000000=Pd_110[0];
+	double P_000010000=Pd_010[1];
+	double P_000110000=Pd_110[1];
+	double P_000000010=Pd_010[2];
+	double P_000000110=Pd_110[2];
+			ans_temp[ans_id*3+0]+=P_010000000*QR_000000000000+P_110000000*QR_000000000100;
+			ans_temp[ans_id*3+1]+=P_000010000*QR_000000000000+P_000110000*QR_000000000010;
+			ans_temp[ans_id*3+2]+=P_000000010*QR_000000000000+P_000000110*QR_000000000001;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_psss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_010000000;
+			double P_000010000;
+			double P_000000010;
+			P_010000000=Pd_010[0];
+			P_000010000=Pd_010[1];
+			P_000000010=Pd_010[2];
+			double PR_010000000000=P_010000000*R_000[0]+aPin1*R_100[0];
+			double PR_000010000000=P_000010000*R_000[0]+aPin1*R_010[0];
+			double PR_000000010000=P_000000010*R_000[0]+aPin1*R_001[0];
+			ans_temp[ans_id*3+0]+=PR_010000000000;
+			ans_temp[ans_id*3+1]+=PR_000010000000;
+			ans_temp[ans_id*3+2]+=PR_000000010000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_psss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_010000000;
+			double P_000010000;
+			double P_000000010;
+			P_010000000=Pd_010[0];
+			P_000010000=Pd_010[1];
+			P_000000010=Pd_010[2];
+			ans_temp[ans_id*3+0]+=P_010000000*R_000[0]+aPin1*R_100[0];
+			ans_temp[ans_id*3+1]+=P_000010000*R_000[0]+aPin1*R_010[0];
+			ans_temp[ans_id*3+2]+=P_000000010*R_000[0]+aPin1*R_001[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_psss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_010000000;
+			double P_000010000;
+			double P_000000010;
+			P_010000000=PD_010[0];
+			P_000010000=PD_010[1];
+			P_000000010=PD_010[2];
+			double PR_010000000000=P_010000000*R_000[0]+R_100[0];
+			double PR_000010000000=P_000010000*R_000[0]+R_010[0];
+			double PR_000000010000=P_000000010*R_000[0]+R_001[0];
+			ans_temp[ans_id*3+0]+=PR_010000000000;
+			ans_temp[ans_id*3+1]+=PR_000010000000;
+			ans_temp[ans_id*3+2]+=PR_000000010000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_psss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[2];
+                Ft_fs_1(1,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+	R_000[1]*=aPin1;
+	double R_100[1];
+	double R_010[1];
+	double R_001[1];
+	for(int i=0;i<1;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+			double P_010000000;
+			double P_000010000;
+			double P_000000010;
+			P_010000000=PD_010[0];
+			P_000010000=PD_010[1];
+			P_000000010=PD_010[2];
+			ans_temp[ans_id*3+0]+=P_010000000*R_000[0]+R_100[0];
+			ans_temp[ans_id*3+1]+=P_000010000*R_000[0]+R_010[0];
+			ans_temp[ans_id*3+2]+=P_000000010*R_000[0]+R_001[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ppss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_011[3];
+		double PD_111[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+	double P_011000000=PD_011[0];
+	double P_111000000=PD_111[0];
+	double P_010001000=PD_010[0]*PD_001[1];
+	double P_010101000=PD_010[0];
+	double P_110001000=PD_001[1];
+	double P_010000001=PD_010[0]*PD_001[2];
+	double P_010000101=PD_010[0];
+	double P_110000001=PD_001[2];
+	double P_001010000=PD_001[0]*PD_010[1];
+	double P_001110000=PD_001[0];
+	double P_101010000=PD_010[1];
+	double P_000011000=PD_011[1];
+	double P_000111000=PD_111[1];
+	double P_000010001=PD_010[1]*PD_001[2];
+	double P_000010101=PD_010[1];
+	double P_000110001=PD_001[2];
+	double P_001000010=PD_001[0]*PD_010[2];
+	double P_001000110=PD_001[0];
+	double P_101000010=PD_010[2];
+	double P_000001010=PD_001[1]*PD_010[2];
+	double P_000001110=PD_001[1];
+	double P_000101010=PD_010[2];
+	double P_000000011=PD_011[2];
+	double P_000000111=PD_111[2];
+				double PR_011000000000=P_011000000*R_000[0]+-1*P_111000000*R_100[0]+R_200[0];
+				double PR_010001000000=P_010001000*R_000[0]+-1*P_010101000*R_010[0]+-1*P_110001000*R_100[0]+R_110[0];
+				double PR_010000001000=P_010000001*R_000[0]+-1*P_010000101*R_001[0]+-1*P_110000001*R_100[0]+R_101[0];
+				double PR_001010000000=P_001010000*R_000[0]+-1*P_001110000*R_010[0]+-1*P_101010000*R_100[0]+R_110[0];
+				double PR_000011000000=P_000011000*R_000[0]+-1*P_000111000*R_010[0]+R_020[0];
+				double PR_000010001000=P_000010001*R_000[0]+-1*P_000010101*R_001[0]+-1*P_000110001*R_010[0]+R_011[0];
+				double PR_001000010000=P_001000010*R_000[0]+-1*P_001000110*R_001[0]+-1*P_101000010*R_100[0]+R_101[0];
+				double PR_000001010000=P_000001010*R_000[0]+-1*P_000001110*R_001[0]+-1*P_000101010*R_010[0]+R_011[0];
+				double PR_000000011000=P_000000011*R_000[0]+-1*P_000000111*R_001[0]+R_002[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_011000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_010001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010000001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_001010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_000011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000010001000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_001000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_000001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000000011000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ppss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+		double PD_011[3];
+		double PD_111[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+	double P_011000000=PD_011[0];
+	double P_111000000=PD_111[0];
+	double P_010001000=PD_010[0]*PD_001[1];
+	double P_010101000=PD_010[0];
+	double P_110001000=PD_001[1];
+	double P_010000001=PD_010[0]*PD_001[2];
+	double P_010000101=PD_010[0];
+	double P_110000001=PD_001[2];
+	double P_001010000=PD_001[0]*PD_010[1];
+	double P_001110000=PD_001[0];
+	double P_101010000=PD_010[1];
+	double P_000011000=PD_011[1];
+	double P_000111000=PD_111[1];
+	double P_000010001=PD_010[1]*PD_001[2];
+	double P_000010101=PD_010[1];
+	double P_000110001=PD_001[2];
+	double P_001000010=PD_001[0]*PD_010[2];
+	double P_001000110=PD_001[0];
+	double P_101000010=PD_010[2];
+	double P_000001010=PD_001[1]*PD_010[2];
+	double P_000001110=PD_001[1];
+	double P_000101010=PD_010[2];
+	double P_000000011=PD_011[2];
+	double P_000000111=PD_111[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_011000000*QR_000000000000+P_111000000*QR_000000000100+QR_000000000200);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_010001000*QR_000000000000+P_010101000*QR_000000000010+P_110001000*QR_000000000100+QR_000000000110);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010000001*QR_000000000000+P_010000101*QR_000000000001+P_110000001*QR_000000000100+QR_000000000101);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_001010000*QR_000000000000+P_001110000*QR_000000000010+P_101010000*QR_000000000100+QR_000000000110);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_000011000*QR_000000000000+P_000111000*QR_000000000010+QR_000000000020);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000010001*QR_000000000000+P_000010101*QR_000000000001+P_000110001*QR_000000000010+QR_000000000011);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_001000010*QR_000000000000+P_001000110*QR_000000000001+P_101000010*QR_000000000100+QR_000000000101);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_000001010*QR_000000000000+P_000001110*QR_000000000001+P_000101010*QR_000000000010+QR_000000000011);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000000011*QR_000000000000+P_000000111*QR_000000000001+QR_000000000002);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ppss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_101[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+	double P_011000000=Pd_011[0];
+	double P_111000000=Pd_111[0];
+	double P_211000000=Pd_211[0];
+	double P_010001000=Pd_010[0]*Pd_001[1];
+	double P_010101000=Pd_010[0]*Pd_101[1];
+	double P_110001000=Pd_110[0]*Pd_001[1];
+	double P_110101000=Pd_110[0]*Pd_101[1];
+	double P_010000001=Pd_010[0]*Pd_001[2];
+	double P_010000101=Pd_010[0]*Pd_101[2];
+	double P_110000001=Pd_110[0]*Pd_001[2];
+	double P_110000101=Pd_110[0]*Pd_101[2];
+	double P_001010000=Pd_001[0]*Pd_010[1];
+	double P_001110000=Pd_001[0]*Pd_110[1];
+	double P_101010000=Pd_101[0]*Pd_010[1];
+	double P_101110000=Pd_101[0]*Pd_110[1];
+	double P_000011000=Pd_011[1];
+	double P_000111000=Pd_111[1];
+	double P_000211000=Pd_211[1];
+	double P_000010001=Pd_010[1]*Pd_001[2];
+	double P_000010101=Pd_010[1]*Pd_101[2];
+	double P_000110001=Pd_110[1]*Pd_001[2];
+	double P_000110101=Pd_110[1]*Pd_101[2];
+	double P_001000010=Pd_001[0]*Pd_010[2];
+	double P_001000110=Pd_001[0]*Pd_110[2];
+	double P_101000010=Pd_101[0]*Pd_010[2];
+	double P_101000110=Pd_101[0]*Pd_110[2];
+	double P_000001010=Pd_001[1]*Pd_010[2];
+	double P_000001110=Pd_001[1]*Pd_110[2];
+	double P_000101010=Pd_101[1]*Pd_010[2];
+	double P_000101110=Pd_101[1]*Pd_110[2];
+	double P_000000011=Pd_011[2];
+	double P_000000111=Pd_111[2];
+	double P_000000211=Pd_211[2];
+				double PR_011000000000=P_011000000*R_000[0]+-1*P_111000000*R_100[0]+P_211000000*R_200[0];
+				double PR_010001000000=P_010001000*R_000[0]+-1*P_010101000*R_010[0]+-1*P_110001000*R_100[0]+P_110101000*R_110[0];
+				double PR_010000001000=P_010000001*R_000[0]+-1*P_010000101*R_001[0]+-1*P_110000001*R_100[0]+P_110000101*R_101[0];
+				double PR_001010000000=P_001010000*R_000[0]+-1*P_001110000*R_010[0]+-1*P_101010000*R_100[0]+P_101110000*R_110[0];
+				double PR_000011000000=P_000011000*R_000[0]+-1*P_000111000*R_010[0]+P_000211000*R_020[0];
+				double PR_000010001000=P_000010001*R_000[0]+-1*P_000010101*R_001[0]+-1*P_000110001*R_010[0]+P_000110101*R_011[0];
+				double PR_001000010000=P_001000010*R_000[0]+-1*P_001000110*R_001[0]+-1*P_101000010*R_100[0]+P_101000110*R_101[0];
+				double PR_000001010000=P_000001010*R_000[0]+-1*P_000001110*R_001[0]+-1*P_000101010*R_010[0]+P_000101110*R_011[0];
+				double PR_000000011000=P_000000011*R_000[0]+-1*P_000000111*R_001[0]+P_000000211*R_002[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_011000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_010001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010000001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_001010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_000011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000010001000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_001000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_000001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000000011000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ppss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+		double Pd_101[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+	double P_011000000=Pd_011[0];
+	double P_111000000=Pd_111[0];
+	double P_211000000=Pd_211[0];
+	double P_010001000=Pd_010[0]*Pd_001[1];
+	double P_010101000=Pd_010[0]*Pd_101[1];
+	double P_110001000=Pd_110[0]*Pd_001[1];
+	double P_110101000=Pd_110[0]*Pd_101[1];
+	double P_010000001=Pd_010[0]*Pd_001[2];
+	double P_010000101=Pd_010[0]*Pd_101[2];
+	double P_110000001=Pd_110[0]*Pd_001[2];
+	double P_110000101=Pd_110[0]*Pd_101[2];
+	double P_001010000=Pd_001[0]*Pd_010[1];
+	double P_001110000=Pd_001[0]*Pd_110[1];
+	double P_101010000=Pd_101[0]*Pd_010[1];
+	double P_101110000=Pd_101[0]*Pd_110[1];
+	double P_000011000=Pd_011[1];
+	double P_000111000=Pd_111[1];
+	double P_000211000=Pd_211[1];
+	double P_000010001=Pd_010[1]*Pd_001[2];
+	double P_000010101=Pd_010[1]*Pd_101[2];
+	double P_000110001=Pd_110[1]*Pd_001[2];
+	double P_000110101=Pd_110[1]*Pd_101[2];
+	double P_001000010=Pd_001[0]*Pd_010[2];
+	double P_001000110=Pd_001[0]*Pd_110[2];
+	double P_101000010=Pd_101[0]*Pd_010[2];
+	double P_101000110=Pd_101[0]*Pd_110[2];
+	double P_000001010=Pd_001[1]*Pd_010[2];
+	double P_000001110=Pd_001[1]*Pd_110[2];
+	double P_000101010=Pd_101[1]*Pd_010[2];
+	double P_000101110=Pd_101[1]*Pd_110[2];
+	double P_000000011=Pd_011[2];
+	double P_000000111=Pd_111[2];
+	double P_000000211=Pd_211[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_011000000*QR_000000000000+P_111000000*QR_000000000100+P_211000000*QR_000000000200);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_010001000*QR_000000000000+P_010101000*QR_000000000010+P_110001000*QR_000000000100+P_110101000*QR_000000000110);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010000001*QR_000000000000+P_010000101*QR_000000000001+P_110000001*QR_000000000100+P_110000101*QR_000000000101);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_001010000*QR_000000000000+P_001110000*QR_000000000010+P_101010000*QR_000000000100+P_101110000*QR_000000000110);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_000011000*QR_000000000000+P_000111000*QR_000000000010+P_000211000*QR_000000000020);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000010001*QR_000000000000+P_000010101*QR_000000000001+P_000110001*QR_000000000010+P_000110101*QR_000000000011);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_001000010*QR_000000000000+P_001000110*QR_000000000001+P_101000010*QR_000000000100+P_101000110*QR_000000000101);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_000001010*QR_000000000000+P_000001110*QR_000000000001+P_000101010*QR_000000000010+P_000101110*QR_000000000011);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000000011*QR_000000000000+P_000000111*QR_000000000001+P_000000211*QR_000000000002);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ppss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_011[3];
+		double Pd_111[3];
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+			double P_011000000;
+			double P_111000000;
+			double P_010001000;
+			double P_010000001;
+			double P_001010000;
+			double P_000011000;
+			double P_000111000;
+			double P_000010001;
+			double P_001000010;
+			double P_000001010;
+			double P_000000011;
+			double P_000000111;
+			double a1P_010000000_1;
+			double a1P_000001000_1;
+			double a1P_000000001_1;
+			double a1P_001000000_1;
+			double a1P_000010000_1;
+			double a1P_000000010_1;
+			P_011000000=Pd_011[0];
+			P_111000000=Pd_111[0];
+			P_010001000=Pd_010[0]*Pd_001[1];
+			P_010000001=Pd_010[0]*Pd_001[2];
+			P_001010000=Pd_001[0]*Pd_010[1];
+			P_000011000=Pd_011[1];
+			P_000111000=Pd_111[1];
+			P_000010001=Pd_010[1]*Pd_001[2];
+			P_001000010=Pd_001[0]*Pd_010[2];
+			P_000001010=Pd_001[1]*Pd_010[2];
+			P_000000011=Pd_011[2];
+			P_000000111=Pd_111[2];
+			a1P_010000000_1=Pd_010[0];
+			a1P_000001000_1=Pd_001[1];
+			a1P_000000001_1=Pd_001[2];
+			a1P_001000000_1=Pd_001[0];
+			a1P_000010000_1=Pd_010[1];
+			a1P_000000010_1=Pd_010[2];
+			double PR_011000000000=P_011000000*R_000[0]+P_111000000*R_100[0]+aPin2*R_200[0];
+			double PR_010001000000=P_010001000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000001000_1*R_100[0]+aPin2*R_110[0];
+			double PR_010000001000=P_010000001*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000001_1*R_100[0]+aPin2*R_101[0];
+			double PR_001010000000=P_001010000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000010000_1*R_100[0]+aPin2*R_110[0];
+			double PR_000011000000=P_000011000*R_000[0]+P_000111000*R_010[0]+aPin2*R_020[0];
+			double PR_000010001000=P_000010001*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000001_1*R_010[0]+aPin2*R_011[0];
+			double PR_001000010000=P_001000010*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000010_1*R_100[0]+aPin2*R_101[0];
+			double PR_000001010000=P_000001010*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000010_1*R_010[0]+aPin2*R_011[0];
+			double PR_000000011000=P_000000011*R_000[0]+P_000000111*R_001[0]+aPin2*R_002[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_011000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_010001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010000001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_001010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_000011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000010001000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_001000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_000001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000000011000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ppss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_011[3];
+		double Pd_111[3];
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+			double P_011000000;
+			double P_111000000;
+			double P_010001000;
+			double P_010000001;
+			double P_001010000;
+			double P_000011000;
+			double P_000111000;
+			double P_000010001;
+			double P_001000010;
+			double P_000001010;
+			double P_000000011;
+			double P_000000111;
+			double a1P_010000000_1;
+			double a1P_000001000_1;
+			double a1P_000000001_1;
+			double a1P_001000000_1;
+			double a1P_000010000_1;
+			double a1P_000000010_1;
+			P_011000000=Pd_011[0];
+			P_111000000=Pd_111[0];
+			P_010001000=Pd_010[0]*Pd_001[1];
+			P_010000001=Pd_010[0]*Pd_001[2];
+			P_001010000=Pd_001[0]*Pd_010[1];
+			P_000011000=Pd_011[1];
+			P_000111000=Pd_111[1];
+			P_000010001=Pd_010[1]*Pd_001[2];
+			P_001000010=Pd_001[0]*Pd_010[2];
+			P_000001010=Pd_001[1]*Pd_010[2];
+			P_000000011=Pd_011[2];
+			P_000000111=Pd_111[2];
+			a1P_010000000_1=Pd_010[0];
+			a1P_000001000_1=Pd_001[1];
+			a1P_000000001_1=Pd_001[2];
+			a1P_001000000_1=Pd_001[0];
+			a1P_000010000_1=Pd_010[1];
+			a1P_000000010_1=Pd_010[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_011000000*R_000[0]+P_111000000*R_100[0]+aPin2*R_200[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_010001000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000001000_1*R_100[0]+aPin2*R_110[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010000001*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000001_1*R_100[0]+aPin2*R_101[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_001010000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000010000_1*R_100[0]+aPin2*R_110[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_000011000*R_000[0]+P_000111000*R_010[0]+aPin2*R_020[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000010001*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000001_1*R_010[0]+aPin2*R_011[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_001000010*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000010_1*R_100[0]+aPin2*R_101[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_000001010*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000010_1*R_010[0]+aPin2*R_011[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000000011*R_000[0]+P_000000111*R_001[0]+aPin2*R_002[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ppss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_011[3];
+		double PD_111[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+			double P_011000000;
+			double P_111000000;
+			double P_010001000;
+			double P_010000001;
+			double P_001010000;
+			double P_000011000;
+			double P_000111000;
+			double P_000010001;
+			double P_001000010;
+			double P_000001010;
+			double P_000000011;
+			double P_000000111;
+			double a1P_010000000_1;
+			double a1P_000001000_1;
+			double a1P_000000001_1;
+			double a1P_001000000_1;
+			double a1P_000010000_1;
+			double a1P_000000010_1;
+			P_011000000=PD_011[0];
+			P_111000000=PD_111[0];
+			P_010001000=PD_010[0]*PD_001[1];
+			P_010000001=PD_010[0]*PD_001[2];
+			P_001010000=PD_001[0]*PD_010[1];
+			P_000011000=PD_011[1];
+			P_000111000=PD_111[1];
+			P_000010001=PD_010[1]*PD_001[2];
+			P_001000010=PD_001[0]*PD_010[2];
+			P_000001010=PD_001[1]*PD_010[2];
+			P_000000011=PD_011[2];
+			P_000000111=PD_111[2];
+			a1P_010000000_1=PD_010[0];
+			a1P_000001000_1=PD_001[1];
+			a1P_000000001_1=PD_001[2];
+			a1P_001000000_1=PD_001[0];
+			a1P_000010000_1=PD_010[1];
+			a1P_000000010_1=PD_010[2];
+			double PR_011000000000=P_011000000*R_000[0]+P_111000000*R_100[0]+R_200[0];
+			double PR_010001000000=P_010001000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000001000_1*R_100[0]+R_110[0];
+			double PR_010000001000=P_010000001*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000001_1*R_100[0]+R_101[0];
+			double PR_001010000000=P_001010000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000010000_1*R_100[0]+R_110[0];
+			double PR_000011000000=P_000011000*R_000[0]+P_000111000*R_010[0]+R_020[0];
+			double PR_000010001000=P_000010001*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000001_1*R_010[0]+R_011[0];
+			double PR_001000010000=P_001000010*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000010_1*R_100[0]+R_101[0];
+			double PR_000001010000=P_000001010*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000010_1*R_010[0]+R_011[0];
+			double PR_000000011000=P_000000011*R_000[0]+P_000000111*R_001[0]+R_002[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_011000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_010001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010000001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_001010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_000011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000010001000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_001000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_000001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000000011000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ppss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_011[3];
+		double PD_111[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+			double P_011000000;
+			double P_111000000;
+			double P_010001000;
+			double P_010000001;
+			double P_001010000;
+			double P_000011000;
+			double P_000111000;
+			double P_000010001;
+			double P_001000010;
+			double P_000001010;
+			double P_000000011;
+			double P_000000111;
+			double a1P_010000000_1;
+			double a1P_000001000_1;
+			double a1P_000000001_1;
+			double a1P_001000000_1;
+			double a1P_000010000_1;
+			double a1P_000000010_1;
+			P_011000000=PD_011[0];
+			P_111000000=PD_111[0];
+			P_010001000=PD_010[0]*PD_001[1];
+			P_010000001=PD_010[0]*PD_001[2];
+			P_001010000=PD_001[0]*PD_010[1];
+			P_000011000=PD_011[1];
+			P_000111000=PD_111[1];
+			P_000010001=PD_010[1]*PD_001[2];
+			P_001000010=PD_001[0]*PD_010[2];
+			P_000001010=PD_001[1]*PD_010[2];
+			P_000000011=PD_011[2];
+			P_000000111=PD_111[2];
+			a1P_010000000_1=PD_010[0];
+			a1P_000001000_1=PD_001[1];
+			a1P_000000001_1=PD_001[2];
+			a1P_001000000_1=PD_001[0];
+			a1P_000010000_1=PD_010[1];
+			a1P_000000010_1=PD_010[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_011000000*R_000[0]+P_111000000*R_100[0]+R_200[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_010001000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000001000_1*R_100[0]+R_110[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010000001*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000001_1*R_100[0]+R_101[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_001010000*R_000[0]+a1P_001000000_1*R_010[0]+a1P_000010000_1*R_100[0]+R_110[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_000011000*R_000[0]+P_000111000*R_010[0]+R_020[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000010001*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000001_1*R_010[0]+R_011[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_001000010*R_000[0]+a1P_001000000_1*R_001[0]+a1P_000000010_1*R_100[0]+R_101[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_000001010*R_000[0]+a1P_000001000_1*R_001[0]+a1P_000000010_1*R_010[0]+R_011[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000000011*R_000[0]+P_000000111*R_001[0]+R_002[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_pdss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=PD_001[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=aPin1*PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=2*aPin1+PD_001[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=PD_001[i]+PD_111[i];
+			}
+	double P_012000000=PD_012[0];
+	double P_112000000=PD_112[0];
+	double P_212000000=PD_212[0];
+	double P_011001000=PD_011[0]*PD_001[1];
+	double P_011101000=PD_011[0];
+	double P_111001000=PD_111[0]*PD_001[1];
+	double P_111101000=PD_111[0];
+	double P_211001000=PD_001[1];
+	double P_010002000=PD_010[0]*PD_002[1];
+	double P_010102000=PD_010[0]*PD_102[1];
+	double P_010202000=PD_010[0];
+	double P_110002000=PD_002[1];
+	double P_110102000=PD_102[1];
+	double P_011000001=PD_011[0]*PD_001[2];
+	double P_011000101=PD_011[0];
+	double P_111000001=PD_111[0]*PD_001[2];
+	double P_111000101=PD_111[0];
+	double P_211000001=PD_001[2];
+	double P_010001001=PD_010[0]*PD_001[1]*PD_001[2];
+	double P_010001101=PD_010[0]*PD_001[1];
+	double P_010101001=PD_010[0]*PD_001[2];
+	double P_010101101=PD_010[0];
+	double P_110001001=PD_001[1]*PD_001[2];
+	double P_110001101=PD_001[1];
+	double P_110101001=PD_001[2];
+	double P_010000002=PD_010[0]*PD_002[2];
+	double P_010000102=PD_010[0]*PD_102[2];
+	double P_010000202=PD_010[0];
+	double P_110000002=PD_002[2];
+	double P_110000102=PD_102[2];
+	double P_002010000=PD_002[0]*PD_010[1];
+	double P_002110000=PD_002[0];
+	double P_102010000=PD_102[0]*PD_010[1];
+	double P_102110000=PD_102[0];
+	double P_202010000=PD_010[1];
+	double P_001011000=PD_001[0]*PD_011[1];
+	double P_001111000=PD_001[0]*PD_111[1];
+	double P_001211000=PD_001[0];
+	double P_101011000=PD_011[1];
+	double P_101111000=PD_111[1];
+	double P_000012000=PD_012[1];
+	double P_000112000=PD_112[1];
+	double P_000212000=PD_212[1];
+	double P_001010001=PD_001[0]*PD_010[1]*PD_001[2];
+	double P_001010101=PD_001[0]*PD_010[1];
+	double P_001110001=PD_001[0]*PD_001[2];
+	double P_001110101=PD_001[0];
+	double P_101010001=PD_010[1]*PD_001[2];
+	double P_101010101=PD_010[1];
+	double P_101110001=PD_001[2];
+	double P_000011001=PD_011[1]*PD_001[2];
+	double P_000011101=PD_011[1];
+	double P_000111001=PD_111[1]*PD_001[2];
+	double P_000111101=PD_111[1];
+	double P_000211001=PD_001[2];
+	double P_000010002=PD_010[1]*PD_002[2];
+	double P_000010102=PD_010[1]*PD_102[2];
+	double P_000010202=PD_010[1];
+	double P_000110002=PD_002[2];
+	double P_000110102=PD_102[2];
+	double P_002000010=PD_002[0]*PD_010[2];
+	double P_002000110=PD_002[0];
+	double P_102000010=PD_102[0]*PD_010[2];
+	double P_102000110=PD_102[0];
+	double P_202000010=PD_010[2];
+	double P_001001010=PD_001[0]*PD_001[1]*PD_010[2];
+	double P_001001110=PD_001[0]*PD_001[1];
+	double P_001101010=PD_001[0]*PD_010[2];
+	double P_001101110=PD_001[0];
+	double P_101001010=PD_001[1]*PD_010[2];
+	double P_101001110=PD_001[1];
+	double P_101101010=PD_010[2];
+	double P_000002010=PD_002[1]*PD_010[2];
+	double P_000002110=PD_002[1];
+	double P_000102010=PD_102[1]*PD_010[2];
+	double P_000102110=PD_102[1];
+	double P_000202010=PD_010[2];
+	double P_001000011=PD_001[0]*PD_011[2];
+	double P_001000111=PD_001[0]*PD_111[2];
+	double P_001000211=PD_001[0];
+	double P_101000011=PD_011[2];
+	double P_101000111=PD_111[2];
+	double P_000001011=PD_001[1]*PD_011[2];
+	double P_000001111=PD_001[1]*PD_111[2];
+	double P_000001211=PD_001[1];
+	double P_000101011=PD_011[2];
+	double P_000101111=PD_111[2];
+	double P_000000012=PD_012[2];
+	double P_000000112=PD_112[2];
+	double P_000000212=PD_212[2];
+				double PR_012000000000=P_012000000*R_000[0]+-1*P_112000000*R_100[0]+P_212000000*R_200[0]+-1*R_300[0];
+				double PR_011001000000=P_011001000*R_000[0]+-1*P_011101000*R_010[0]+-1*P_111001000*R_100[0]+P_111101000*R_110[0]+P_211001000*R_200[0]+-1*R_210[0];
+				double PR_010002000000=P_010002000*R_000[0]+-1*P_010102000*R_010[0]+P_010202000*R_020[0]+-1*P_110002000*R_100[0]+P_110102000*R_110[0]+-1*R_120[0];
+				double PR_011000001000=P_011000001*R_000[0]+-1*P_011000101*R_001[0]+-1*P_111000001*R_100[0]+P_111000101*R_101[0]+P_211000001*R_200[0]+-1*R_201[0];
+				double PR_010001001000=P_010001001*R_000[0]+-1*P_010001101*R_001[0]+-1*P_010101001*R_010[0]+P_010101101*R_011[0]+-1*P_110001001*R_100[0]+P_110001101*R_101[0]+P_110101001*R_110[0]+-1*R_111[0];
+				double PR_010000002000=P_010000002*R_000[0]+-1*P_010000102*R_001[0]+P_010000202*R_002[0]+-1*P_110000002*R_100[0]+P_110000102*R_101[0]+-1*R_102[0];
+				double PR_002010000000=P_002010000*R_000[0]+-1*P_002110000*R_010[0]+-1*P_102010000*R_100[0]+P_102110000*R_110[0]+P_202010000*R_200[0]+-1*R_210[0];
+				double PR_001011000000=P_001011000*R_000[0]+-1*P_001111000*R_010[0]+P_001211000*R_020[0]+-1*P_101011000*R_100[0]+P_101111000*R_110[0]+-1*R_120[0];
+				double PR_000012000000=P_000012000*R_000[0]+-1*P_000112000*R_010[0]+P_000212000*R_020[0]+-1*R_030[0];
+				double PR_001010001000=P_001010001*R_000[0]+-1*P_001010101*R_001[0]+-1*P_001110001*R_010[0]+P_001110101*R_011[0]+-1*P_101010001*R_100[0]+P_101010101*R_101[0]+P_101110001*R_110[0]+-1*R_111[0];
+				double PR_000011001000=P_000011001*R_000[0]+-1*P_000011101*R_001[0]+-1*P_000111001*R_010[0]+P_000111101*R_011[0]+P_000211001*R_020[0]+-1*R_021[0];
+				double PR_000010002000=P_000010002*R_000[0]+-1*P_000010102*R_001[0]+P_000010202*R_002[0]+-1*P_000110002*R_010[0]+P_000110102*R_011[0]+-1*R_012[0];
+				double PR_002000010000=P_002000010*R_000[0]+-1*P_002000110*R_001[0]+-1*P_102000010*R_100[0]+P_102000110*R_101[0]+P_202000010*R_200[0]+-1*R_201[0];
+				double PR_001001010000=P_001001010*R_000[0]+-1*P_001001110*R_001[0]+-1*P_001101010*R_010[0]+P_001101110*R_011[0]+-1*P_101001010*R_100[0]+P_101001110*R_101[0]+P_101101010*R_110[0]+-1*R_111[0];
+				double PR_000002010000=P_000002010*R_000[0]+-1*P_000002110*R_001[0]+-1*P_000102010*R_010[0]+P_000102110*R_011[0]+P_000202010*R_020[0]+-1*R_021[0];
+				double PR_001000011000=P_001000011*R_000[0]+-1*P_001000111*R_001[0]+P_001000211*R_002[0]+-1*P_101000011*R_100[0]+P_101000111*R_101[0]+-1*R_102[0];
+				double PR_000001011000=P_000001011*R_000[0]+-1*P_000001111*R_001[0]+P_000001211*R_002[0]+-1*P_000101011*R_010[0]+P_000101111*R_011[0]+-1*R_012[0];
+				double PR_000000012000=P_000000012*R_000[0]+-1*P_000000112*R_001[0]+P_000000212*R_002[0]+-1*R_003[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_012000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_011001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010002000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(PR_011000001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(PR_010001001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(PR_010000002000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_002010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_001011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000012000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(PR_001010001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(PR_000011001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(PR_000010002000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_002000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_001001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000002010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(PR_001000011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(PR_000001011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(PR_000000012000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_pdss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+				double QR_000000000003=R_003[0];
+				double QR_000000000012=R_012[0];
+				double QR_000000000021=R_021[0];
+				double QR_000000000030=R_030[0];
+				double QR_000000000102=R_102[0];
+				double QR_000000000111=R_111[0];
+				double QR_000000000120=R_120[0];
+				double QR_000000000201=R_201[0];
+				double QR_000000000210=R_210[0];
+				double QR_000000000300=R_300[0];
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=PD_001[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=aPin1*PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=2*aPin1+PD_001[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=PD_001[i]+PD_111[i];
+			}
+	double P_012000000=PD_012[0];
+	double P_112000000=PD_112[0];
+	double P_212000000=PD_212[0];
+	double P_011001000=PD_011[0]*PD_001[1];
+	double P_011101000=PD_011[0];
+	double P_111001000=PD_111[0]*PD_001[1];
+	double P_111101000=PD_111[0];
+	double P_211001000=PD_001[1];
+	double P_010002000=PD_010[0]*PD_002[1];
+	double P_010102000=PD_010[0]*PD_102[1];
+	double P_010202000=PD_010[0];
+	double P_110002000=PD_002[1];
+	double P_110102000=PD_102[1];
+	double P_011000001=PD_011[0]*PD_001[2];
+	double P_011000101=PD_011[0];
+	double P_111000001=PD_111[0]*PD_001[2];
+	double P_111000101=PD_111[0];
+	double P_211000001=PD_001[2];
+	double P_010001001=PD_010[0]*PD_001[1]*PD_001[2];
+	double P_010001101=PD_010[0]*PD_001[1];
+	double P_010101001=PD_010[0]*PD_001[2];
+	double P_010101101=PD_010[0];
+	double P_110001001=PD_001[1]*PD_001[2];
+	double P_110001101=PD_001[1];
+	double P_110101001=PD_001[2];
+	double P_010000002=PD_010[0]*PD_002[2];
+	double P_010000102=PD_010[0]*PD_102[2];
+	double P_010000202=PD_010[0];
+	double P_110000002=PD_002[2];
+	double P_110000102=PD_102[2];
+	double P_002010000=PD_002[0]*PD_010[1];
+	double P_002110000=PD_002[0];
+	double P_102010000=PD_102[0]*PD_010[1];
+	double P_102110000=PD_102[0];
+	double P_202010000=PD_010[1];
+	double P_001011000=PD_001[0]*PD_011[1];
+	double P_001111000=PD_001[0]*PD_111[1];
+	double P_001211000=PD_001[0];
+	double P_101011000=PD_011[1];
+	double P_101111000=PD_111[1];
+	double P_000012000=PD_012[1];
+	double P_000112000=PD_112[1];
+	double P_000212000=PD_212[1];
+	double P_001010001=PD_001[0]*PD_010[1]*PD_001[2];
+	double P_001010101=PD_001[0]*PD_010[1];
+	double P_001110001=PD_001[0]*PD_001[2];
+	double P_001110101=PD_001[0];
+	double P_101010001=PD_010[1]*PD_001[2];
+	double P_101010101=PD_010[1];
+	double P_101110001=PD_001[2];
+	double P_000011001=PD_011[1]*PD_001[2];
+	double P_000011101=PD_011[1];
+	double P_000111001=PD_111[1]*PD_001[2];
+	double P_000111101=PD_111[1];
+	double P_000211001=PD_001[2];
+	double P_000010002=PD_010[1]*PD_002[2];
+	double P_000010102=PD_010[1]*PD_102[2];
+	double P_000010202=PD_010[1];
+	double P_000110002=PD_002[2];
+	double P_000110102=PD_102[2];
+	double P_002000010=PD_002[0]*PD_010[2];
+	double P_002000110=PD_002[0];
+	double P_102000010=PD_102[0]*PD_010[2];
+	double P_102000110=PD_102[0];
+	double P_202000010=PD_010[2];
+	double P_001001010=PD_001[0]*PD_001[1]*PD_010[2];
+	double P_001001110=PD_001[0]*PD_001[1];
+	double P_001101010=PD_001[0]*PD_010[2];
+	double P_001101110=PD_001[0];
+	double P_101001010=PD_001[1]*PD_010[2];
+	double P_101001110=PD_001[1];
+	double P_101101010=PD_010[2];
+	double P_000002010=PD_002[1]*PD_010[2];
+	double P_000002110=PD_002[1];
+	double P_000102010=PD_102[1]*PD_010[2];
+	double P_000102110=PD_102[1];
+	double P_000202010=PD_010[2];
+	double P_001000011=PD_001[0]*PD_011[2];
+	double P_001000111=PD_001[0]*PD_111[2];
+	double P_001000211=PD_001[0];
+	double P_101000011=PD_011[2];
+	double P_101000111=PD_111[2];
+	double P_000001011=PD_001[1]*PD_011[2];
+	double P_000001111=PD_001[1]*PD_111[2];
+	double P_000001211=PD_001[1];
+	double P_000101011=PD_011[2];
+	double P_000101111=PD_111[2];
+	double P_000000012=PD_012[2];
+	double P_000000112=PD_112[2];
+	double P_000000212=PD_212[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_012000000*QR_000000000000+P_112000000*QR_000000000100+P_212000000*QR_000000000200+QR_000000000300);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_011001000*QR_000000000000+P_011101000*QR_000000000010+P_111001000*QR_000000000100+P_111101000*QR_000000000110+P_211001000*QR_000000000200+QR_000000000210);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010002000*QR_000000000000+P_010102000*QR_000000000010+P_010202000*QR_000000000020+P_110002000*QR_000000000100+P_110102000*QR_000000000110+QR_000000000120);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(P_011000001*QR_000000000000+P_011000101*QR_000000000001+P_111000001*QR_000000000100+P_111000101*QR_000000000101+P_211000001*QR_000000000200+QR_000000000201);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(P_010001001*QR_000000000000+P_010001101*QR_000000000001+P_010101001*QR_000000000010+P_010101101*QR_000000000011+P_110001001*QR_000000000100+P_110001101*QR_000000000101+P_110101001*QR_000000000110+QR_000000000111);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(P_010000002*QR_000000000000+P_010000102*QR_000000000001+P_010000202*QR_000000000002+P_110000002*QR_000000000100+P_110000102*QR_000000000101+QR_000000000102);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_002010000*QR_000000000000+P_002110000*QR_000000000010+P_102010000*QR_000000000100+P_102110000*QR_000000000110+P_202010000*QR_000000000200+QR_000000000210);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_001011000*QR_000000000000+P_001111000*QR_000000000010+P_001211000*QR_000000000020+P_101011000*QR_000000000100+P_101111000*QR_000000000110+QR_000000000120);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000012000*QR_000000000000+P_000112000*QR_000000000010+P_000212000*QR_000000000020+QR_000000000030);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(P_001010001*QR_000000000000+P_001010101*QR_000000000001+P_001110001*QR_000000000010+P_001110101*QR_000000000011+P_101010001*QR_000000000100+P_101010101*QR_000000000101+P_101110001*QR_000000000110+QR_000000000111);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(P_000011001*QR_000000000000+P_000011101*QR_000000000001+P_000111001*QR_000000000010+P_000111101*QR_000000000011+P_000211001*QR_000000000020+QR_000000000021);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(P_000010002*QR_000000000000+P_000010102*QR_000000000001+P_000010202*QR_000000000002+P_000110002*QR_000000000010+P_000110102*QR_000000000011+QR_000000000012);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_002000010*QR_000000000000+P_002000110*QR_000000000001+P_102000010*QR_000000000100+P_102000110*QR_000000000101+P_202000010*QR_000000000200+QR_000000000201);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_001001010*QR_000000000000+P_001001110*QR_000000000001+P_001101010*QR_000000000010+P_001101110*QR_000000000011+P_101001010*QR_000000000100+P_101001110*QR_000000000101+P_101101010*QR_000000000110+QR_000000000111);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000002010*QR_000000000000+P_000002110*QR_000000000001+P_000102010*QR_000000000010+P_000102110*QR_000000000011+P_000202010*QR_000000000020+QR_000000000021);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(P_001000011*QR_000000000000+P_001000111*QR_000000000001+P_001000211*QR_000000000002+P_101000011*QR_000000000100+P_101000111*QR_000000000101+QR_000000000102);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(P_000001011*QR_000000000000+P_000001111*QR_000000000001+P_000001211*QR_000000000002+P_000101011*QR_000000000010+P_000101111*QR_000000000011+QR_000000000012);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(P_000000012*QR_000000000000+P_000000112*QR_000000000001+P_000000212*QR_000000000002+QR_000000000003);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_pdss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double Pd_101[3];
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_202[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		double Pd_312[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=aPin1*(2.000000*Pd_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_202[i]=aPin1*(Pd_101[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=aPin1*(Pd_002[i]+2.000000*Pd_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=aPin1*(0.500000*Pd_102[i]+Pd_111[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_312[i]=aPin1*(0.333333*Pd_202[i]+0.666667*Pd_211[i]);
+			}
+	double P_012000000=Pd_012[0];
+	double P_112000000=Pd_112[0];
+	double P_212000000=Pd_212[0];
+	double P_312000000=Pd_312[0];
+	double P_011001000=Pd_011[0]*Pd_001[1];
+	double P_011101000=Pd_011[0]*Pd_101[1];
+	double P_111001000=Pd_111[0]*Pd_001[1];
+	double P_111101000=Pd_111[0]*Pd_101[1];
+	double P_211001000=Pd_211[0]*Pd_001[1];
+	double P_211101000=Pd_211[0]*Pd_101[1];
+	double P_010002000=Pd_010[0]*Pd_002[1];
+	double P_010102000=Pd_010[0]*Pd_102[1];
+	double P_010202000=Pd_010[0]*Pd_202[1];
+	double P_110002000=Pd_110[0]*Pd_002[1];
+	double P_110102000=Pd_110[0]*Pd_102[1];
+	double P_110202000=Pd_110[0]*Pd_202[1];
+	double P_011000001=Pd_011[0]*Pd_001[2];
+	double P_011000101=Pd_011[0]*Pd_101[2];
+	double P_111000001=Pd_111[0]*Pd_001[2];
+	double P_111000101=Pd_111[0]*Pd_101[2];
+	double P_211000001=Pd_211[0]*Pd_001[2];
+	double P_211000101=Pd_211[0]*Pd_101[2];
+	double P_010001001=Pd_010[0]*Pd_001[1]*Pd_001[2];
+	double P_010001101=Pd_010[0]*Pd_001[1]*Pd_101[2];
+	double P_010101001=Pd_010[0]*Pd_101[1]*Pd_001[2];
+	double P_010101101=Pd_010[0]*Pd_101[1]*Pd_101[2];
+	double P_110001001=Pd_110[0]*Pd_001[1]*Pd_001[2];
+	double P_110001101=Pd_110[0]*Pd_001[1]*Pd_101[2];
+	double P_110101001=Pd_110[0]*Pd_101[1]*Pd_001[2];
+	double P_110101101=Pd_110[0]*Pd_101[1]*Pd_101[2];
+	double P_010000002=Pd_010[0]*Pd_002[2];
+	double P_010000102=Pd_010[0]*Pd_102[2];
+	double P_010000202=Pd_010[0]*Pd_202[2];
+	double P_110000002=Pd_110[0]*Pd_002[2];
+	double P_110000102=Pd_110[0]*Pd_102[2];
+	double P_110000202=Pd_110[0]*Pd_202[2];
+	double P_002010000=Pd_002[0]*Pd_010[1];
+	double P_002110000=Pd_002[0]*Pd_110[1];
+	double P_102010000=Pd_102[0]*Pd_010[1];
+	double P_102110000=Pd_102[0]*Pd_110[1];
+	double P_202010000=Pd_202[0]*Pd_010[1];
+	double P_202110000=Pd_202[0]*Pd_110[1];
+	double P_001011000=Pd_001[0]*Pd_011[1];
+	double P_001111000=Pd_001[0]*Pd_111[1];
+	double P_001211000=Pd_001[0]*Pd_211[1];
+	double P_101011000=Pd_101[0]*Pd_011[1];
+	double P_101111000=Pd_101[0]*Pd_111[1];
+	double P_101211000=Pd_101[0]*Pd_211[1];
+	double P_000012000=Pd_012[1];
+	double P_000112000=Pd_112[1];
+	double P_000212000=Pd_212[1];
+	double P_000312000=Pd_312[1];
+	double P_001010001=Pd_001[0]*Pd_010[1]*Pd_001[2];
+	double P_001010101=Pd_001[0]*Pd_010[1]*Pd_101[2];
+	double P_001110001=Pd_001[0]*Pd_110[1]*Pd_001[2];
+	double P_001110101=Pd_001[0]*Pd_110[1]*Pd_101[2];
+	double P_101010001=Pd_101[0]*Pd_010[1]*Pd_001[2];
+	double P_101010101=Pd_101[0]*Pd_010[1]*Pd_101[2];
+	double P_101110001=Pd_101[0]*Pd_110[1]*Pd_001[2];
+	double P_101110101=Pd_101[0]*Pd_110[1]*Pd_101[2];
+	double P_000011001=Pd_011[1]*Pd_001[2];
+	double P_000011101=Pd_011[1]*Pd_101[2];
+	double P_000111001=Pd_111[1]*Pd_001[2];
+	double P_000111101=Pd_111[1]*Pd_101[2];
+	double P_000211001=Pd_211[1]*Pd_001[2];
+	double P_000211101=Pd_211[1]*Pd_101[2];
+	double P_000010002=Pd_010[1]*Pd_002[2];
+	double P_000010102=Pd_010[1]*Pd_102[2];
+	double P_000010202=Pd_010[1]*Pd_202[2];
+	double P_000110002=Pd_110[1]*Pd_002[2];
+	double P_000110102=Pd_110[1]*Pd_102[2];
+	double P_000110202=Pd_110[1]*Pd_202[2];
+	double P_002000010=Pd_002[0]*Pd_010[2];
+	double P_002000110=Pd_002[0]*Pd_110[2];
+	double P_102000010=Pd_102[0]*Pd_010[2];
+	double P_102000110=Pd_102[0]*Pd_110[2];
+	double P_202000010=Pd_202[0]*Pd_010[2];
+	double P_202000110=Pd_202[0]*Pd_110[2];
+	double P_001001010=Pd_001[0]*Pd_001[1]*Pd_010[2];
+	double P_001001110=Pd_001[0]*Pd_001[1]*Pd_110[2];
+	double P_001101010=Pd_001[0]*Pd_101[1]*Pd_010[2];
+	double P_001101110=Pd_001[0]*Pd_101[1]*Pd_110[2];
+	double P_101001010=Pd_101[0]*Pd_001[1]*Pd_010[2];
+	double P_101001110=Pd_101[0]*Pd_001[1]*Pd_110[2];
+	double P_101101010=Pd_101[0]*Pd_101[1]*Pd_010[2];
+	double P_101101110=Pd_101[0]*Pd_101[1]*Pd_110[2];
+	double P_000002010=Pd_002[1]*Pd_010[2];
+	double P_000002110=Pd_002[1]*Pd_110[2];
+	double P_000102010=Pd_102[1]*Pd_010[2];
+	double P_000102110=Pd_102[1]*Pd_110[2];
+	double P_000202010=Pd_202[1]*Pd_010[2];
+	double P_000202110=Pd_202[1]*Pd_110[2];
+	double P_001000011=Pd_001[0]*Pd_011[2];
+	double P_001000111=Pd_001[0]*Pd_111[2];
+	double P_001000211=Pd_001[0]*Pd_211[2];
+	double P_101000011=Pd_101[0]*Pd_011[2];
+	double P_101000111=Pd_101[0]*Pd_111[2];
+	double P_101000211=Pd_101[0]*Pd_211[2];
+	double P_000001011=Pd_001[1]*Pd_011[2];
+	double P_000001111=Pd_001[1]*Pd_111[2];
+	double P_000001211=Pd_001[1]*Pd_211[2];
+	double P_000101011=Pd_101[1]*Pd_011[2];
+	double P_000101111=Pd_101[1]*Pd_111[2];
+	double P_000101211=Pd_101[1]*Pd_211[2];
+	double P_000000012=Pd_012[2];
+	double P_000000112=Pd_112[2];
+	double P_000000212=Pd_212[2];
+	double P_000000312=Pd_312[2];
+				double PR_012000000000=P_012000000*R_000[0]+-1*P_112000000*R_100[0]+P_212000000*R_200[0]+-1*P_312000000*R_300[0];
+				double PR_011001000000=P_011001000*R_000[0]+-1*P_011101000*R_010[0]+-1*P_111001000*R_100[0]+P_111101000*R_110[0]+P_211001000*R_200[0]+-1*P_211101000*R_210[0];
+				double PR_010002000000=P_010002000*R_000[0]+-1*P_010102000*R_010[0]+P_010202000*R_020[0]+-1*P_110002000*R_100[0]+P_110102000*R_110[0]+-1*P_110202000*R_120[0];
+				double PR_011000001000=P_011000001*R_000[0]+-1*P_011000101*R_001[0]+-1*P_111000001*R_100[0]+P_111000101*R_101[0]+P_211000001*R_200[0]+-1*P_211000101*R_201[0];
+				double PR_010001001000=P_010001001*R_000[0]+-1*P_010001101*R_001[0]+-1*P_010101001*R_010[0]+P_010101101*R_011[0]+-1*P_110001001*R_100[0]+P_110001101*R_101[0]+P_110101001*R_110[0]+-1*P_110101101*R_111[0];
+				double PR_010000002000=P_010000002*R_000[0]+-1*P_010000102*R_001[0]+P_010000202*R_002[0]+-1*P_110000002*R_100[0]+P_110000102*R_101[0]+-1*P_110000202*R_102[0];
+				double PR_002010000000=P_002010000*R_000[0]+-1*P_002110000*R_010[0]+-1*P_102010000*R_100[0]+P_102110000*R_110[0]+P_202010000*R_200[0]+-1*P_202110000*R_210[0];
+				double PR_001011000000=P_001011000*R_000[0]+-1*P_001111000*R_010[0]+P_001211000*R_020[0]+-1*P_101011000*R_100[0]+P_101111000*R_110[0]+-1*P_101211000*R_120[0];
+				double PR_000012000000=P_000012000*R_000[0]+-1*P_000112000*R_010[0]+P_000212000*R_020[0]+-1*P_000312000*R_030[0];
+				double PR_001010001000=P_001010001*R_000[0]+-1*P_001010101*R_001[0]+-1*P_001110001*R_010[0]+P_001110101*R_011[0]+-1*P_101010001*R_100[0]+P_101010101*R_101[0]+P_101110001*R_110[0]+-1*P_101110101*R_111[0];
+				double PR_000011001000=P_000011001*R_000[0]+-1*P_000011101*R_001[0]+-1*P_000111001*R_010[0]+P_000111101*R_011[0]+P_000211001*R_020[0]+-1*P_000211101*R_021[0];
+				double PR_000010002000=P_000010002*R_000[0]+-1*P_000010102*R_001[0]+P_000010202*R_002[0]+-1*P_000110002*R_010[0]+P_000110102*R_011[0]+-1*P_000110202*R_012[0];
+				double PR_002000010000=P_002000010*R_000[0]+-1*P_002000110*R_001[0]+-1*P_102000010*R_100[0]+P_102000110*R_101[0]+P_202000010*R_200[0]+-1*P_202000110*R_201[0];
+				double PR_001001010000=P_001001010*R_000[0]+-1*P_001001110*R_001[0]+-1*P_001101010*R_010[0]+P_001101110*R_011[0]+-1*P_101001010*R_100[0]+P_101001110*R_101[0]+P_101101010*R_110[0]+-1*P_101101110*R_111[0];
+				double PR_000002010000=P_000002010*R_000[0]+-1*P_000002110*R_001[0]+-1*P_000102010*R_010[0]+P_000102110*R_011[0]+P_000202010*R_020[0]+-1*P_000202110*R_021[0];
+				double PR_001000011000=P_001000011*R_000[0]+-1*P_001000111*R_001[0]+P_001000211*R_002[0]+-1*P_101000011*R_100[0]+P_101000111*R_101[0]+-1*P_101000211*R_102[0];
+				double PR_000001011000=P_000001011*R_000[0]+-1*P_000001111*R_001[0]+P_000001211*R_002[0]+-1*P_000101011*R_010[0]+P_000101111*R_011[0]+-1*P_000101211*R_012[0];
+				double PR_000000012000=P_000000012*R_000[0]+-1*P_000000112*R_001[0]+P_000000212*R_002[0]+-1*P_000000312*R_003[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_012000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_011001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010002000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(PR_011000001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(PR_010001001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(PR_010000002000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_002010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_001011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000012000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(PR_001010001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(PR_000011001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(PR_000010002000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_002000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_001001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000002010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(PR_001000011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(PR_000001011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(PR_000000012000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_pdss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+				double QR_000000000003=R_003[0];
+				double QR_000000000012=R_012[0];
+				double QR_000000000021=R_021[0];
+				double QR_000000000030=R_030[0];
+				double QR_000000000102=R_102[0];
+				double QR_000000000111=R_111[0];
+				double QR_000000000120=R_120[0];
+				double QR_000000000201=R_201[0];
+				double QR_000000000210=R_210[0];
+				double QR_000000000300=R_300[0];
+		double Pd_101[3];
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_202[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		double Pd_312[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=aPin1*(2.000000*Pd_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_202[i]=aPin1*(Pd_101[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=aPin1*(Pd_002[i]+2.000000*Pd_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=aPin1*(0.500000*Pd_102[i]+Pd_111[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_312[i]=aPin1*(0.333333*Pd_202[i]+0.666667*Pd_211[i]);
+			}
+	double P_012000000=Pd_012[0];
+	double P_112000000=Pd_112[0];
+	double P_212000000=Pd_212[0];
+	double P_312000000=Pd_312[0];
+	double P_011001000=Pd_011[0]*Pd_001[1];
+	double P_011101000=Pd_011[0]*Pd_101[1];
+	double P_111001000=Pd_111[0]*Pd_001[1];
+	double P_111101000=Pd_111[0]*Pd_101[1];
+	double P_211001000=Pd_211[0]*Pd_001[1];
+	double P_211101000=Pd_211[0]*Pd_101[1];
+	double P_010002000=Pd_010[0]*Pd_002[1];
+	double P_010102000=Pd_010[0]*Pd_102[1];
+	double P_010202000=Pd_010[0]*Pd_202[1];
+	double P_110002000=Pd_110[0]*Pd_002[1];
+	double P_110102000=Pd_110[0]*Pd_102[1];
+	double P_110202000=Pd_110[0]*Pd_202[1];
+	double P_011000001=Pd_011[0]*Pd_001[2];
+	double P_011000101=Pd_011[0]*Pd_101[2];
+	double P_111000001=Pd_111[0]*Pd_001[2];
+	double P_111000101=Pd_111[0]*Pd_101[2];
+	double P_211000001=Pd_211[0]*Pd_001[2];
+	double P_211000101=Pd_211[0]*Pd_101[2];
+	double P_010001001=Pd_010[0]*Pd_001[1]*Pd_001[2];
+	double P_010001101=Pd_010[0]*Pd_001[1]*Pd_101[2];
+	double P_010101001=Pd_010[0]*Pd_101[1]*Pd_001[2];
+	double P_010101101=Pd_010[0]*Pd_101[1]*Pd_101[2];
+	double P_110001001=Pd_110[0]*Pd_001[1]*Pd_001[2];
+	double P_110001101=Pd_110[0]*Pd_001[1]*Pd_101[2];
+	double P_110101001=Pd_110[0]*Pd_101[1]*Pd_001[2];
+	double P_110101101=Pd_110[0]*Pd_101[1]*Pd_101[2];
+	double P_010000002=Pd_010[0]*Pd_002[2];
+	double P_010000102=Pd_010[0]*Pd_102[2];
+	double P_010000202=Pd_010[0]*Pd_202[2];
+	double P_110000002=Pd_110[0]*Pd_002[2];
+	double P_110000102=Pd_110[0]*Pd_102[2];
+	double P_110000202=Pd_110[0]*Pd_202[2];
+	double P_002010000=Pd_002[0]*Pd_010[1];
+	double P_002110000=Pd_002[0]*Pd_110[1];
+	double P_102010000=Pd_102[0]*Pd_010[1];
+	double P_102110000=Pd_102[0]*Pd_110[1];
+	double P_202010000=Pd_202[0]*Pd_010[1];
+	double P_202110000=Pd_202[0]*Pd_110[1];
+	double P_001011000=Pd_001[0]*Pd_011[1];
+	double P_001111000=Pd_001[0]*Pd_111[1];
+	double P_001211000=Pd_001[0]*Pd_211[1];
+	double P_101011000=Pd_101[0]*Pd_011[1];
+	double P_101111000=Pd_101[0]*Pd_111[1];
+	double P_101211000=Pd_101[0]*Pd_211[1];
+	double P_000012000=Pd_012[1];
+	double P_000112000=Pd_112[1];
+	double P_000212000=Pd_212[1];
+	double P_000312000=Pd_312[1];
+	double P_001010001=Pd_001[0]*Pd_010[1]*Pd_001[2];
+	double P_001010101=Pd_001[0]*Pd_010[1]*Pd_101[2];
+	double P_001110001=Pd_001[0]*Pd_110[1]*Pd_001[2];
+	double P_001110101=Pd_001[0]*Pd_110[1]*Pd_101[2];
+	double P_101010001=Pd_101[0]*Pd_010[1]*Pd_001[2];
+	double P_101010101=Pd_101[0]*Pd_010[1]*Pd_101[2];
+	double P_101110001=Pd_101[0]*Pd_110[1]*Pd_001[2];
+	double P_101110101=Pd_101[0]*Pd_110[1]*Pd_101[2];
+	double P_000011001=Pd_011[1]*Pd_001[2];
+	double P_000011101=Pd_011[1]*Pd_101[2];
+	double P_000111001=Pd_111[1]*Pd_001[2];
+	double P_000111101=Pd_111[1]*Pd_101[2];
+	double P_000211001=Pd_211[1]*Pd_001[2];
+	double P_000211101=Pd_211[1]*Pd_101[2];
+	double P_000010002=Pd_010[1]*Pd_002[2];
+	double P_000010102=Pd_010[1]*Pd_102[2];
+	double P_000010202=Pd_010[1]*Pd_202[2];
+	double P_000110002=Pd_110[1]*Pd_002[2];
+	double P_000110102=Pd_110[1]*Pd_102[2];
+	double P_000110202=Pd_110[1]*Pd_202[2];
+	double P_002000010=Pd_002[0]*Pd_010[2];
+	double P_002000110=Pd_002[0]*Pd_110[2];
+	double P_102000010=Pd_102[0]*Pd_010[2];
+	double P_102000110=Pd_102[0]*Pd_110[2];
+	double P_202000010=Pd_202[0]*Pd_010[2];
+	double P_202000110=Pd_202[0]*Pd_110[2];
+	double P_001001010=Pd_001[0]*Pd_001[1]*Pd_010[2];
+	double P_001001110=Pd_001[0]*Pd_001[1]*Pd_110[2];
+	double P_001101010=Pd_001[0]*Pd_101[1]*Pd_010[2];
+	double P_001101110=Pd_001[0]*Pd_101[1]*Pd_110[2];
+	double P_101001010=Pd_101[0]*Pd_001[1]*Pd_010[2];
+	double P_101001110=Pd_101[0]*Pd_001[1]*Pd_110[2];
+	double P_101101010=Pd_101[0]*Pd_101[1]*Pd_010[2];
+	double P_101101110=Pd_101[0]*Pd_101[1]*Pd_110[2];
+	double P_000002010=Pd_002[1]*Pd_010[2];
+	double P_000002110=Pd_002[1]*Pd_110[2];
+	double P_000102010=Pd_102[1]*Pd_010[2];
+	double P_000102110=Pd_102[1]*Pd_110[2];
+	double P_000202010=Pd_202[1]*Pd_010[2];
+	double P_000202110=Pd_202[1]*Pd_110[2];
+	double P_001000011=Pd_001[0]*Pd_011[2];
+	double P_001000111=Pd_001[0]*Pd_111[2];
+	double P_001000211=Pd_001[0]*Pd_211[2];
+	double P_101000011=Pd_101[0]*Pd_011[2];
+	double P_101000111=Pd_101[0]*Pd_111[2];
+	double P_101000211=Pd_101[0]*Pd_211[2];
+	double P_000001011=Pd_001[1]*Pd_011[2];
+	double P_000001111=Pd_001[1]*Pd_111[2];
+	double P_000001211=Pd_001[1]*Pd_211[2];
+	double P_000101011=Pd_101[1]*Pd_011[2];
+	double P_000101111=Pd_101[1]*Pd_111[2];
+	double P_000101211=Pd_101[1]*Pd_211[2];
+	double P_000000012=Pd_012[2];
+	double P_000000112=Pd_112[2];
+	double P_000000212=Pd_212[2];
+	double P_000000312=Pd_312[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_012000000*QR_000000000000+P_112000000*QR_000000000100+P_212000000*QR_000000000200+P_312000000*QR_000000000300);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_011001000*QR_000000000000+P_011101000*QR_000000000010+P_111001000*QR_000000000100+P_111101000*QR_000000000110+P_211001000*QR_000000000200+P_211101000*QR_000000000210);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010002000*QR_000000000000+P_010102000*QR_000000000010+P_010202000*QR_000000000020+P_110002000*QR_000000000100+P_110102000*QR_000000000110+P_110202000*QR_000000000120);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(P_011000001*QR_000000000000+P_011000101*QR_000000000001+P_111000001*QR_000000000100+P_111000101*QR_000000000101+P_211000001*QR_000000000200+P_211000101*QR_000000000201);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(P_010001001*QR_000000000000+P_010001101*QR_000000000001+P_010101001*QR_000000000010+P_010101101*QR_000000000011+P_110001001*QR_000000000100+P_110001101*QR_000000000101+P_110101001*QR_000000000110+P_110101101*QR_000000000111);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(P_010000002*QR_000000000000+P_010000102*QR_000000000001+P_010000202*QR_000000000002+P_110000002*QR_000000000100+P_110000102*QR_000000000101+P_110000202*QR_000000000102);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_002010000*QR_000000000000+P_002110000*QR_000000000010+P_102010000*QR_000000000100+P_102110000*QR_000000000110+P_202010000*QR_000000000200+P_202110000*QR_000000000210);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_001011000*QR_000000000000+P_001111000*QR_000000000010+P_001211000*QR_000000000020+P_101011000*QR_000000000100+P_101111000*QR_000000000110+P_101211000*QR_000000000120);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000012000*QR_000000000000+P_000112000*QR_000000000010+P_000212000*QR_000000000020+P_000312000*QR_000000000030);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(P_001010001*QR_000000000000+P_001010101*QR_000000000001+P_001110001*QR_000000000010+P_001110101*QR_000000000011+P_101010001*QR_000000000100+P_101010101*QR_000000000101+P_101110001*QR_000000000110+P_101110101*QR_000000000111);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(P_000011001*QR_000000000000+P_000011101*QR_000000000001+P_000111001*QR_000000000010+P_000111101*QR_000000000011+P_000211001*QR_000000000020+P_000211101*QR_000000000021);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(P_000010002*QR_000000000000+P_000010102*QR_000000000001+P_000010202*QR_000000000002+P_000110002*QR_000000000010+P_000110102*QR_000000000011+P_000110202*QR_000000000012);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_002000010*QR_000000000000+P_002000110*QR_000000000001+P_102000010*QR_000000000100+P_102000110*QR_000000000101+P_202000010*QR_000000000200+P_202000110*QR_000000000201);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_001001010*QR_000000000000+P_001001110*QR_000000000001+P_001101010*QR_000000000010+P_001101110*QR_000000000011+P_101001010*QR_000000000100+P_101001110*QR_000000000101+P_101101010*QR_000000000110+P_101101110*QR_000000000111);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000002010*QR_000000000000+P_000002110*QR_000000000001+P_000102010*QR_000000000010+P_000102110*QR_000000000011+P_000202010*QR_000000000020+P_000202110*QR_000000000021);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(P_001000011*QR_000000000000+P_001000111*QR_000000000001+P_001000211*QR_000000000002+P_101000011*QR_000000000100+P_101000111*QR_000000000101+P_101000211*QR_000000000102);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(P_000001011*QR_000000000000+P_000001111*QR_000000000001+P_000001211*QR_000000000002+P_000101011*QR_000000000010+P_000101111*QR_000000000011+P_000101211*QR_000000000012);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(P_000000012*QR_000000000000+P_000000112*QR_000000000001+P_000000212*QR_000000000002+P_000000312*QR_000000000003);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_pdss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=Pd_001[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=2*aPin2+Pd_001[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=Pd_001[i]*aPin2+aPin1*Pd_111[i];
+			}
+			double P_012000000;
+			double P_112000000;
+			double P_212000000;
+			double P_011001000;
+			double P_111001000;
+			double P_010002000;
+			double P_011000001;
+			double P_111000001;
+			double P_010001001;
+			double P_010000002;
+			double P_002010000;
+			double P_001011000;
+			double P_001111000;
+			double P_000012000;
+			double P_000112000;
+			double P_000212000;
+			double P_001010001;
+			double P_000011001;
+			double P_000111001;
+			double P_000010002;
+			double P_002000010;
+			double P_001001010;
+			double P_000002010;
+			double P_001000011;
+			double P_001000111;
+			double P_000001011;
+			double P_000001111;
+			double P_000000012;
+			double P_000000112;
+			double P_000000212;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000001000_1;
+			double a2P_000001000_2;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a1P_000002000_1;
+			double a2P_000000001_1;
+			double a2P_000000001_2;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a1P_000001001_1;
+			double a1P_000000002_1;
+			double a1P_002000000_1;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a2P_001000000_2;
+			double a2P_000010000_1;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_001000001_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a2P_000000010_1;
+			double a1P_001001000_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			P_012000000=Pd_012[0];
+			P_112000000=Pd_112[0];
+			P_212000000=Pd_212[0];
+			P_011001000=Pd_011[0]*Pd_001[1];
+			P_111001000=Pd_111[0]*Pd_001[1];
+			P_010002000=Pd_010[0]*Pd_002[1];
+			P_011000001=Pd_011[0]*Pd_001[2];
+			P_111000001=Pd_111[0]*Pd_001[2];
+			P_010001001=Pd_010[0]*Pd_001[1]*Pd_001[2];
+			P_010000002=Pd_010[0]*Pd_002[2];
+			P_002010000=Pd_002[0]*Pd_010[1];
+			P_001011000=Pd_001[0]*Pd_011[1];
+			P_001111000=Pd_001[0]*Pd_111[1];
+			P_000012000=Pd_012[1];
+			P_000112000=Pd_112[1];
+			P_000212000=Pd_212[1];
+			P_001010001=Pd_001[0]*Pd_010[1]*Pd_001[2];
+			P_000011001=Pd_011[1]*Pd_001[2];
+			P_000111001=Pd_111[1]*Pd_001[2];
+			P_000010002=Pd_010[1]*Pd_002[2];
+			P_002000010=Pd_002[0]*Pd_010[2];
+			P_001001010=Pd_001[0]*Pd_001[1]*Pd_010[2];
+			P_000002010=Pd_002[1]*Pd_010[2];
+			P_001000011=Pd_001[0]*Pd_011[2];
+			P_001000111=Pd_001[0]*Pd_111[2];
+			P_000001011=Pd_001[1]*Pd_011[2];
+			P_000001111=Pd_001[1]*Pd_111[2];
+			P_000000012=Pd_012[2];
+			P_000000112=Pd_112[2];
+			P_000000212=Pd_212[2];
+			a1P_011000000_1=Pd_011[0];
+			a1P_111000000_1=Pd_111[0];
+			a2P_000001000_1=Pd_001[1];
+			a2P_000001000_2=2*a2P_000001000_1;
+			a1P_010001000_1=Pd_010[0]*Pd_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=Pd_010[0];
+			a1P_000002000_1=Pd_002[1];
+			a2P_000000001_1=Pd_001[2];
+			a2P_000000001_2=2*a2P_000000001_1;
+			a1P_010000001_1=Pd_010[0]*Pd_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a1P_000001001_1=Pd_001[1]*Pd_001[2];
+			a1P_000000002_1=Pd_002[2];
+			a1P_002000000_1=Pd_002[0];
+			a1P_001010000_1=Pd_001[0]*Pd_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=Pd_001[0];
+			a2P_001000000_2=2*a2P_001000000_1;
+			a2P_000010000_1=Pd_010[1];
+			a1P_000011000_1=Pd_011[1];
+			a1P_000111000_1=Pd_111[1];
+			a1P_001000001_1=Pd_001[0]*Pd_001[2];
+			a1P_000010001_1=Pd_010[1]*Pd_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001000010_1=Pd_001[0]*Pd_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a2P_000000010_1=Pd_010[2];
+			a1P_001001000_1=Pd_001[0]*Pd_001[1];
+			a1P_000001010_1=Pd_001[1]*Pd_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=Pd_011[2];
+			a1P_000000111_1=Pd_111[2];
+			double PR_012000000000=P_012000000*R_000[0]+P_112000000*R_100[0]+P_212000000*R_200[0]+aPin3*R_300[0];
+			double PR_011001000000=P_011001000*R_000[0]+a1P_011000000_1*R_010[0]+P_111001000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000001000_1*R_200[0]+aPin3*R_210[0];
+			double PR_010002000000=P_010002000*R_000[0]+a1P_010001000_2*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000002000_1*R_100[0]+a2P_000001000_2*R_110[0]+aPin3*R_120[0];
+			double PR_011000001000=P_011000001*R_000[0]+a1P_011000000_1*R_001[0]+P_111000001*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000001_1*R_200[0]+aPin3*R_201[0];
+			double PR_010001001000=P_010001001*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001001_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000001_1*R_110[0]+aPin3*R_111[0];
+			double PR_010000002000=P_010000002*R_000[0]+a1P_010000001_2*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000002_1*R_100[0]+a2P_000000001_2*R_101[0]+aPin3*R_102[0];
+			double PR_002010000000=P_002010000*R_000[0]+a1P_002000000_1*R_010[0]+a1P_001010000_2*R_100[0]+a2P_001000000_2*R_110[0]+a2P_000010000_1*R_200[0]+aPin3*R_210[0];
+			double PR_001011000000=P_001011000*R_000[0]+P_001111000*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+aPin3*R_120[0];
+			double PR_000012000000=P_000012000*R_000[0]+P_000112000*R_010[0]+P_000212000*R_020[0]+aPin3*R_030[0];
+			double PR_001010001000=P_001010001*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000001_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+aPin3*R_111[0];
+			double PR_000011001000=P_000011001*R_000[0]+a1P_000011000_1*R_001[0]+P_000111001*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000001_1*R_020[0]+aPin3*R_021[0];
+			double PR_000010002000=P_000010002*R_000[0]+a1P_000010001_2*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000002_1*R_010[0]+a2P_000000001_2*R_011[0]+aPin3*R_012[0];
+			double PR_002000010000=P_002000010*R_000[0]+a1P_002000000_1*R_001[0]+a1P_001000010_2*R_100[0]+a2P_001000000_2*R_101[0]+a2P_000000010_1*R_200[0]+aPin3*R_201[0];
+			double PR_001001010000=P_001001010*R_000[0]+a1P_001001000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+aPin3*R_111[0];
+			double PR_000002010000=P_000002010*R_000[0]+a1P_000002000_1*R_001[0]+a1P_000001010_2*R_010[0]+a2P_000001000_2*R_011[0]+a2P_000000010_1*R_020[0]+aPin3*R_021[0];
+			double PR_001000011000=P_001000011*R_000[0]+P_001000111*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+aPin3*R_102[0];
+			double PR_000001011000=P_000001011*R_000[0]+P_000001111*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+aPin3*R_012[0];
+			double PR_000000012000=P_000000012*R_000[0]+P_000000112*R_001[0]+P_000000212*R_002[0]+aPin3*R_003[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_012000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_011001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010002000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(PR_011000001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(PR_010001001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(PR_010000002000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_002010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_001011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000012000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(PR_001010001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(PR_000011001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(PR_000010002000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_002000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_001001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000002010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(PR_001000011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(PR_000001011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(PR_000000012000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_pdss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=Pd_001[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=2*aPin2+Pd_001[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=Pd_001[i]*aPin2+aPin1*Pd_111[i];
+			}
+			double P_012000000;
+			double P_112000000;
+			double P_212000000;
+			double P_011001000;
+			double P_111001000;
+			double P_010002000;
+			double P_011000001;
+			double P_111000001;
+			double P_010001001;
+			double P_010000002;
+			double P_002010000;
+			double P_001011000;
+			double P_001111000;
+			double P_000012000;
+			double P_000112000;
+			double P_000212000;
+			double P_001010001;
+			double P_000011001;
+			double P_000111001;
+			double P_000010002;
+			double P_002000010;
+			double P_001001010;
+			double P_000002010;
+			double P_001000011;
+			double P_001000111;
+			double P_000001011;
+			double P_000001111;
+			double P_000000012;
+			double P_000000112;
+			double P_000000212;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000001000_1;
+			double a2P_000001000_2;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a1P_000002000_1;
+			double a2P_000000001_1;
+			double a2P_000000001_2;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a1P_000001001_1;
+			double a1P_000000002_1;
+			double a1P_002000000_1;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a2P_001000000_2;
+			double a2P_000010000_1;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_001000001_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a2P_000000010_1;
+			double a1P_001001000_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			P_012000000=Pd_012[0];
+			P_112000000=Pd_112[0];
+			P_212000000=Pd_212[0];
+			P_011001000=Pd_011[0]*Pd_001[1];
+			P_111001000=Pd_111[0]*Pd_001[1];
+			P_010002000=Pd_010[0]*Pd_002[1];
+			P_011000001=Pd_011[0]*Pd_001[2];
+			P_111000001=Pd_111[0]*Pd_001[2];
+			P_010001001=Pd_010[0]*Pd_001[1]*Pd_001[2];
+			P_010000002=Pd_010[0]*Pd_002[2];
+			P_002010000=Pd_002[0]*Pd_010[1];
+			P_001011000=Pd_001[0]*Pd_011[1];
+			P_001111000=Pd_001[0]*Pd_111[1];
+			P_000012000=Pd_012[1];
+			P_000112000=Pd_112[1];
+			P_000212000=Pd_212[1];
+			P_001010001=Pd_001[0]*Pd_010[1]*Pd_001[2];
+			P_000011001=Pd_011[1]*Pd_001[2];
+			P_000111001=Pd_111[1]*Pd_001[2];
+			P_000010002=Pd_010[1]*Pd_002[2];
+			P_002000010=Pd_002[0]*Pd_010[2];
+			P_001001010=Pd_001[0]*Pd_001[1]*Pd_010[2];
+			P_000002010=Pd_002[1]*Pd_010[2];
+			P_001000011=Pd_001[0]*Pd_011[2];
+			P_001000111=Pd_001[0]*Pd_111[2];
+			P_000001011=Pd_001[1]*Pd_011[2];
+			P_000001111=Pd_001[1]*Pd_111[2];
+			P_000000012=Pd_012[2];
+			P_000000112=Pd_112[2];
+			P_000000212=Pd_212[2];
+			a1P_011000000_1=Pd_011[0];
+			a1P_111000000_1=Pd_111[0];
+			a2P_000001000_1=Pd_001[1];
+			a2P_000001000_2=2*a2P_000001000_1;
+			a1P_010001000_1=Pd_010[0]*Pd_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=Pd_010[0];
+			a1P_000002000_1=Pd_002[1];
+			a2P_000000001_1=Pd_001[2];
+			a2P_000000001_2=2*a2P_000000001_1;
+			a1P_010000001_1=Pd_010[0]*Pd_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a1P_000001001_1=Pd_001[1]*Pd_001[2];
+			a1P_000000002_1=Pd_002[2];
+			a1P_002000000_1=Pd_002[0];
+			a1P_001010000_1=Pd_001[0]*Pd_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=Pd_001[0];
+			a2P_001000000_2=2*a2P_001000000_1;
+			a2P_000010000_1=Pd_010[1];
+			a1P_000011000_1=Pd_011[1];
+			a1P_000111000_1=Pd_111[1];
+			a1P_001000001_1=Pd_001[0]*Pd_001[2];
+			a1P_000010001_1=Pd_010[1]*Pd_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001000010_1=Pd_001[0]*Pd_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a2P_000000010_1=Pd_010[2];
+			a1P_001001000_1=Pd_001[0]*Pd_001[1];
+			a1P_000001010_1=Pd_001[1]*Pd_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=Pd_011[2];
+			a1P_000000111_1=Pd_111[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_012000000*R_000[0]+P_112000000*R_100[0]+P_212000000*R_200[0]+aPin3*R_300[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_011001000*R_000[0]+a1P_011000000_1*R_010[0]+P_111001000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000001000_1*R_200[0]+aPin3*R_210[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010002000*R_000[0]+a1P_010001000_2*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000002000_1*R_100[0]+a2P_000001000_2*R_110[0]+aPin3*R_120[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(P_011000001*R_000[0]+a1P_011000000_1*R_001[0]+P_111000001*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000001_1*R_200[0]+aPin3*R_201[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(P_010001001*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001001_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000001_1*R_110[0]+aPin3*R_111[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(P_010000002*R_000[0]+a1P_010000001_2*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000002_1*R_100[0]+a2P_000000001_2*R_101[0]+aPin3*R_102[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_002010000*R_000[0]+a1P_002000000_1*R_010[0]+a1P_001010000_2*R_100[0]+a2P_001000000_2*R_110[0]+a2P_000010000_1*R_200[0]+aPin3*R_210[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_001011000*R_000[0]+P_001111000*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+aPin3*R_120[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000012000*R_000[0]+P_000112000*R_010[0]+P_000212000*R_020[0]+aPin3*R_030[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(P_001010001*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000001_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+aPin3*R_111[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(P_000011001*R_000[0]+a1P_000011000_1*R_001[0]+P_000111001*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000001_1*R_020[0]+aPin3*R_021[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(P_000010002*R_000[0]+a1P_000010001_2*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000002_1*R_010[0]+a2P_000000001_2*R_011[0]+aPin3*R_012[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_002000010*R_000[0]+a1P_002000000_1*R_001[0]+a1P_001000010_2*R_100[0]+a2P_001000000_2*R_101[0]+a2P_000000010_1*R_200[0]+aPin3*R_201[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_001001010*R_000[0]+a1P_001001000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+aPin3*R_111[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000002010*R_000[0]+a1P_000002000_1*R_001[0]+a1P_000001010_2*R_010[0]+a2P_000001000_2*R_011[0]+a2P_000000010_1*R_020[0]+aPin3*R_021[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(P_001000011*R_000[0]+P_001000111*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+aPin3*R_102[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(P_000001011*R_000[0]+P_000001111*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+aPin3*R_012[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(P_000000012*R_000[0]+P_000000112*R_001[0]+P_000000212*R_002[0]+aPin3*R_003[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_pdss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=(2.000000*PD_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=(PD_002[i]+2.000000*PD_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=(0.500000*PD_102[i]+PD_111[i]);
+			}
+			double P_012000000;
+			double P_112000000;
+			double P_212000000;
+			double P_011001000;
+			double P_111001000;
+			double P_010002000;
+			double P_011000001;
+			double P_111000001;
+			double P_010001001;
+			double P_010000002;
+			double P_002010000;
+			double P_001011000;
+			double P_001111000;
+			double P_000012000;
+			double P_000112000;
+			double P_000212000;
+			double P_001010001;
+			double P_000011001;
+			double P_000111001;
+			double P_000010002;
+			double P_002000010;
+			double P_001001010;
+			double P_000002010;
+			double P_001000011;
+			double P_001000111;
+			double P_000001011;
+			double P_000001111;
+			double P_000000012;
+			double P_000000112;
+			double P_000000212;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000001000_1;
+			double a2P_000001000_2;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a1P_000002000_1;
+			double a2P_000000001_1;
+			double a2P_000000001_2;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a1P_000001001_1;
+			double a1P_000000002_1;
+			double a1P_002000000_1;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a2P_001000000_2;
+			double a2P_000010000_1;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_001000001_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a2P_000000010_1;
+			double a1P_001001000_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			P_012000000=PD_012[0];
+			P_112000000=PD_112[0];
+			P_212000000=PD_212[0];
+			P_011001000=PD_011[0]*PD_001[1];
+			P_111001000=PD_111[0]*PD_001[1];
+			P_010002000=PD_010[0]*PD_002[1];
+			P_011000001=PD_011[0]*PD_001[2];
+			P_111000001=PD_111[0]*PD_001[2];
+			P_010001001=PD_010[0]*PD_001[1]*PD_001[2];
+			P_010000002=PD_010[0]*PD_002[2];
+			P_002010000=PD_002[0]*PD_010[1];
+			P_001011000=PD_001[0]*PD_011[1];
+			P_001111000=PD_001[0]*PD_111[1];
+			P_000012000=PD_012[1];
+			P_000112000=PD_112[1];
+			P_000212000=PD_212[1];
+			P_001010001=PD_001[0]*PD_010[1]*PD_001[2];
+			P_000011001=PD_011[1]*PD_001[2];
+			P_000111001=PD_111[1]*PD_001[2];
+			P_000010002=PD_010[1]*PD_002[2];
+			P_002000010=PD_002[0]*PD_010[2];
+			P_001001010=PD_001[0]*PD_001[1]*PD_010[2];
+			P_000002010=PD_002[1]*PD_010[2];
+			P_001000011=PD_001[0]*PD_011[2];
+			P_001000111=PD_001[0]*PD_111[2];
+			P_000001011=PD_001[1]*PD_011[2];
+			P_000001111=PD_001[1]*PD_111[2];
+			P_000000012=PD_012[2];
+			P_000000112=PD_112[2];
+			P_000000212=PD_212[2];
+			a1P_011000000_1=PD_011[0];
+			a1P_111000000_1=PD_111[0];
+			a2P_000001000_1=PD_001[1];
+			a2P_000001000_2=2*a2P_000001000_1;
+			a1P_010001000_1=PD_010[0]*PD_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=PD_010[0];
+			a1P_000002000_1=PD_002[1];
+			a2P_000000001_1=PD_001[2];
+			a2P_000000001_2=2*a2P_000000001_1;
+			a1P_010000001_1=PD_010[0]*PD_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a1P_000001001_1=PD_001[1]*PD_001[2];
+			a1P_000000002_1=PD_002[2];
+			a1P_002000000_1=PD_002[0];
+			a1P_001010000_1=PD_001[0]*PD_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=PD_001[0];
+			a2P_001000000_2=2*a2P_001000000_1;
+			a2P_000010000_1=PD_010[1];
+			a1P_000011000_1=PD_011[1];
+			a1P_000111000_1=PD_111[1];
+			a1P_001000001_1=PD_001[0]*PD_001[2];
+			a1P_000010001_1=PD_010[1]*PD_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001000010_1=PD_001[0]*PD_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a2P_000000010_1=PD_010[2];
+			a1P_001001000_1=PD_001[0]*PD_001[1];
+			a1P_000001010_1=PD_001[1]*PD_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=PD_011[2];
+			a1P_000000111_1=PD_111[2];
+			double PR_012000000000=P_012000000*R_000[0]+P_112000000*R_100[0]+P_212000000*R_200[0]+R_300[0];
+			double PR_011001000000=P_011001000*R_000[0]+a1P_011000000_1*R_010[0]+P_111001000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000001000_1*R_200[0]+R_210[0];
+			double PR_010002000000=P_010002000*R_000[0]+a1P_010001000_2*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000002000_1*R_100[0]+a2P_000001000_2*R_110[0]+R_120[0];
+			double PR_011000001000=P_011000001*R_000[0]+a1P_011000000_1*R_001[0]+P_111000001*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000001_1*R_200[0]+R_201[0];
+			double PR_010001001000=P_010001001*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001001_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000001_1*R_110[0]+R_111[0];
+			double PR_010000002000=P_010000002*R_000[0]+a1P_010000001_2*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000002_1*R_100[0]+a2P_000000001_2*R_101[0]+R_102[0];
+			double PR_002010000000=P_002010000*R_000[0]+a1P_002000000_1*R_010[0]+a1P_001010000_2*R_100[0]+a2P_001000000_2*R_110[0]+a2P_000010000_1*R_200[0]+R_210[0];
+			double PR_001011000000=P_001011000*R_000[0]+P_001111000*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+R_120[0];
+			double PR_000012000000=P_000012000*R_000[0]+P_000112000*R_010[0]+P_000212000*R_020[0]+R_030[0];
+			double PR_001010001000=P_001010001*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000001_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+R_111[0];
+			double PR_000011001000=P_000011001*R_000[0]+a1P_000011000_1*R_001[0]+P_000111001*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000001_1*R_020[0]+R_021[0];
+			double PR_000010002000=P_000010002*R_000[0]+a1P_000010001_2*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000002_1*R_010[0]+a2P_000000001_2*R_011[0]+R_012[0];
+			double PR_002000010000=P_002000010*R_000[0]+a1P_002000000_1*R_001[0]+a1P_001000010_2*R_100[0]+a2P_001000000_2*R_101[0]+a2P_000000010_1*R_200[0]+R_201[0];
+			double PR_001001010000=P_001001010*R_000[0]+a1P_001001000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+R_111[0];
+			double PR_000002010000=P_000002010*R_000[0]+a1P_000002000_1*R_001[0]+a1P_000001010_2*R_010[0]+a2P_000001000_2*R_011[0]+a2P_000000010_1*R_020[0]+R_021[0];
+			double PR_001000011000=P_001000011*R_000[0]+P_001000111*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+R_102[0];
+			double PR_000001011000=P_000001011*R_000[0]+P_000001111*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+R_012[0];
+			double PR_000000012000=P_000000012*R_000[0]+P_000000112*R_001[0]+P_000000212*R_002[0]+R_003[0];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(PR_012000000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(PR_011001000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(PR_010002000000);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(PR_011000001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(PR_010001001000);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(PR_010000002000);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(PR_002010000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(PR_001011000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(PR_000012000000);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(PR_001010001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(PR_000011001000);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(PR_000010002000);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(PR_002000010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(PR_001001010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(PR_000002010000);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(PR_001000011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(PR_000001011000);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(PR_000000012000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_pdss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*3];
+    for(int i=0;i<3;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=(2.000000*PD_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=(PD_002[i]+2.000000*PD_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=(0.500000*PD_102[i]+PD_111[i]);
+			}
+			double P_012000000;
+			double P_112000000;
+			double P_212000000;
+			double P_011001000;
+			double P_111001000;
+			double P_010002000;
+			double P_011000001;
+			double P_111000001;
+			double P_010001001;
+			double P_010000002;
+			double P_002010000;
+			double P_001011000;
+			double P_001111000;
+			double P_000012000;
+			double P_000112000;
+			double P_000212000;
+			double P_001010001;
+			double P_000011001;
+			double P_000111001;
+			double P_000010002;
+			double P_002000010;
+			double P_001001010;
+			double P_000002010;
+			double P_001000011;
+			double P_001000111;
+			double P_000001011;
+			double P_000001111;
+			double P_000000012;
+			double P_000000112;
+			double P_000000212;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000001000_1;
+			double a2P_000001000_2;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a1P_000002000_1;
+			double a2P_000000001_1;
+			double a2P_000000001_2;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a1P_000001001_1;
+			double a1P_000000002_1;
+			double a1P_002000000_1;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a2P_001000000_2;
+			double a2P_000010000_1;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_001000001_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a2P_000000010_1;
+			double a1P_001001000_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			P_012000000=PD_012[0];
+			P_112000000=PD_112[0];
+			P_212000000=PD_212[0];
+			P_011001000=PD_011[0]*PD_001[1];
+			P_111001000=PD_111[0]*PD_001[1];
+			P_010002000=PD_010[0]*PD_002[1];
+			P_011000001=PD_011[0]*PD_001[2];
+			P_111000001=PD_111[0]*PD_001[2];
+			P_010001001=PD_010[0]*PD_001[1]*PD_001[2];
+			P_010000002=PD_010[0]*PD_002[2];
+			P_002010000=PD_002[0]*PD_010[1];
+			P_001011000=PD_001[0]*PD_011[1];
+			P_001111000=PD_001[0]*PD_111[1];
+			P_000012000=PD_012[1];
+			P_000112000=PD_112[1];
+			P_000212000=PD_212[1];
+			P_001010001=PD_001[0]*PD_010[1]*PD_001[2];
+			P_000011001=PD_011[1]*PD_001[2];
+			P_000111001=PD_111[1]*PD_001[2];
+			P_000010002=PD_010[1]*PD_002[2];
+			P_002000010=PD_002[0]*PD_010[2];
+			P_001001010=PD_001[0]*PD_001[1]*PD_010[2];
+			P_000002010=PD_002[1]*PD_010[2];
+			P_001000011=PD_001[0]*PD_011[2];
+			P_001000111=PD_001[0]*PD_111[2];
+			P_000001011=PD_001[1]*PD_011[2];
+			P_000001111=PD_001[1]*PD_111[2];
+			P_000000012=PD_012[2];
+			P_000000112=PD_112[2];
+			P_000000212=PD_212[2];
+			a1P_011000000_1=PD_011[0];
+			a1P_111000000_1=PD_111[0];
+			a2P_000001000_1=PD_001[1];
+			a2P_000001000_2=2*a2P_000001000_1;
+			a1P_010001000_1=PD_010[0]*PD_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=PD_010[0];
+			a1P_000002000_1=PD_002[1];
+			a2P_000000001_1=PD_001[2];
+			a2P_000000001_2=2*a2P_000000001_1;
+			a1P_010000001_1=PD_010[0]*PD_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a1P_000001001_1=PD_001[1]*PD_001[2];
+			a1P_000000002_1=PD_002[2];
+			a1P_002000000_1=PD_002[0];
+			a1P_001010000_1=PD_001[0]*PD_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=PD_001[0];
+			a2P_001000000_2=2*a2P_001000000_1;
+			a2P_000010000_1=PD_010[1];
+			a1P_000011000_1=PD_011[1];
+			a1P_000111000_1=PD_111[1];
+			a1P_001000001_1=PD_001[0]*PD_001[2];
+			a1P_000010001_1=PD_010[1]*PD_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001000010_1=PD_001[0]*PD_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a2P_000000010_1=PD_010[2];
+			a1P_001001000_1=PD_001[0]*PD_001[1];
+			a1P_000001010_1=PD_001[1]*PD_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=PD_011[2];
+			a1P_000000111_1=PD_111[2];
+			ans_temp[ans_id*3+0]+=Pmtrx[0]*(P_012000000*R_000[0]+P_112000000*R_100[0]+P_212000000*R_200[0]+R_300[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[1]*(P_011001000*R_000[0]+a1P_011000000_1*R_010[0]+P_111001000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000001000_1*R_200[0]+R_210[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[2]*(P_010002000*R_000[0]+a1P_010001000_2*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000002000_1*R_100[0]+a2P_000001000_2*R_110[0]+R_120[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[3]*(P_011000001*R_000[0]+a1P_011000000_1*R_001[0]+P_111000001*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000001_1*R_200[0]+R_201[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[4]*(P_010001001*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001001_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000001_1*R_110[0]+R_111[0]);
+			ans_temp[ans_id*3+0]+=Pmtrx[5]*(P_010000002*R_000[0]+a1P_010000001_2*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000002_1*R_100[0]+a2P_000000001_2*R_101[0]+R_102[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[0]*(P_002010000*R_000[0]+a1P_002000000_1*R_010[0]+a1P_001010000_2*R_100[0]+a2P_001000000_2*R_110[0]+a2P_000010000_1*R_200[0]+R_210[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[1]*(P_001011000*R_000[0]+P_001111000*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+R_120[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[2]*(P_000012000*R_000[0]+P_000112000*R_010[0]+P_000212000*R_020[0]+R_030[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[3]*(P_001010001*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000001_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+R_111[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[4]*(P_000011001*R_000[0]+a1P_000011000_1*R_001[0]+P_000111001*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000001_1*R_020[0]+R_021[0]);
+			ans_temp[ans_id*3+1]+=Pmtrx[5]*(P_000010002*R_000[0]+a1P_000010001_2*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000002_1*R_010[0]+a2P_000000001_2*R_011[0]+R_012[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[0]*(P_002000010*R_000[0]+a1P_002000000_1*R_001[0]+a1P_001000010_2*R_100[0]+a2P_001000000_2*R_101[0]+a2P_000000010_1*R_200[0]+R_201[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[1]*(P_001001010*R_000[0]+a1P_001001000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+R_111[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[2]*(P_000002010*R_000[0]+a1P_000002000_1*R_001[0]+a1P_000001010_2*R_010[0]+a2P_000001000_2*R_011[0]+a2P_000000010_1*R_020[0]+R_021[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[3]*(P_001000011*R_000[0]+P_001000111*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+R_102[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[4]*(P_000001011*R_000[0]+P_000001111*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+R_012[0]);
+			ans_temp[ans_id*3+2]+=Pmtrx[5]*(P_000000012*R_000[0]+P_000000112*R_001[0]+P_000000212*R_002[0]+R_003[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<3;ians++){
+                    ans_temp[tId_x*3+ians]+=ans_temp[(tId_x+num_thread)*3+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<3;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*3+ians]=ans_temp[(tId_x)*3+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dsss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_020[3];
+		double PD_120[3];
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=PD_010[i]+PD_010[i];
+			}
+	double P_020000000=PD_020[0];
+	double P_120000000=PD_120[0];
+	double P_010010000=PD_010[0]*PD_010[1];
+	double P_010110000=PD_010[0];
+	double P_110010000=PD_010[1];
+	double P_000020000=PD_020[1];
+	double P_000120000=PD_120[1];
+	double P_010000010=PD_010[0]*PD_010[2];
+	double P_010000110=PD_010[0];
+	double P_110000010=PD_010[2];
+	double P_000010010=PD_010[1]*PD_010[2];
+	double P_000010110=PD_010[1];
+	double P_000110010=PD_010[2];
+	double P_000000020=PD_020[2];
+	double P_000000120=PD_120[2];
+				double PR_020000000000=P_020000000*R_000[0]+-1*P_120000000*R_100[0]+R_200[0];
+				double PR_010010000000=P_010010000*R_000[0]+-1*P_010110000*R_010[0]+-1*P_110010000*R_100[0]+R_110[0];
+				double PR_000020000000=P_000020000*R_000[0]+-1*P_000120000*R_010[0]+R_020[0];
+				double PR_010000010000=P_010000010*R_000[0]+-1*P_010000110*R_001[0]+-1*P_110000010*R_100[0]+R_101[0];
+				double PR_000010010000=P_000010010*R_000[0]+-1*P_000010110*R_001[0]+-1*P_000110010*R_010[0]+R_011[0];
+				double PR_000000020000=P_000000020*R_000[0]+-1*P_000000120*R_001[0]+R_002[0];
+			ans_temp[ans_id*6+0]+=PR_020000000000;
+			ans_temp[ans_id*6+1]+=PR_010010000000;
+			ans_temp[ans_id*6+2]+=PR_000020000000;
+			ans_temp[ans_id*6+3]+=PR_010000010000;
+			ans_temp[ans_id*6+4]+=PR_000010010000;
+			ans_temp[ans_id*6+5]+=PR_000000020000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dsss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+		double PD_020[3];
+		double PD_120[3];
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=PD_010[i]+PD_010[i];
+			}
+	double P_020000000=PD_020[0];
+	double P_120000000=PD_120[0];
+	double P_010010000=PD_010[0]*PD_010[1];
+	double P_010110000=PD_010[0];
+	double P_110010000=PD_010[1];
+	double P_000020000=PD_020[1];
+	double P_000120000=PD_120[1];
+	double P_010000010=PD_010[0]*PD_010[2];
+	double P_010000110=PD_010[0];
+	double P_110000010=PD_010[2];
+	double P_000010010=PD_010[1]*PD_010[2];
+	double P_000010110=PD_010[1];
+	double P_000110010=PD_010[2];
+	double P_000000020=PD_020[2];
+	double P_000000120=PD_120[2];
+			ans_temp[ans_id*6+0]+=P_020000000*QR_000000000000+P_120000000*QR_000000000100+QR_000000000200;
+			ans_temp[ans_id*6+1]+=P_010010000*QR_000000000000+P_010110000*QR_000000000010+P_110010000*QR_000000000100+QR_000000000110;
+			ans_temp[ans_id*6+2]+=P_000020000*QR_000000000000+P_000120000*QR_000000000010+QR_000000000020;
+			ans_temp[ans_id*6+3]+=P_010000010*QR_000000000000+P_010000110*QR_000000000001+P_110000010*QR_000000000100+QR_000000000101;
+			ans_temp[ans_id*6+4]+=P_000010010*QR_000000000000+P_000010110*QR_000000000001+P_000110010*QR_000000000010+QR_000000000011;
+			ans_temp[ans_id*6+5]+=P_000000020*QR_000000000000+P_000000120*QR_000000000001+QR_000000000002;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dsss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_110[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_220[3];
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=aPin1*(2.000000*Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_220[i]=aPin1*(Pd_110[i]);
+			}
+	double P_020000000=Pd_020[0];
+	double P_120000000=Pd_120[0];
+	double P_220000000=Pd_220[0];
+	double P_010010000=Pd_010[0]*Pd_010[1];
+	double P_010110000=Pd_010[0]*Pd_110[1];
+	double P_110010000=Pd_110[0]*Pd_010[1];
+	double P_110110000=Pd_110[0]*Pd_110[1];
+	double P_000020000=Pd_020[1];
+	double P_000120000=Pd_120[1];
+	double P_000220000=Pd_220[1];
+	double P_010000010=Pd_010[0]*Pd_010[2];
+	double P_010000110=Pd_010[0]*Pd_110[2];
+	double P_110000010=Pd_110[0]*Pd_010[2];
+	double P_110000110=Pd_110[0]*Pd_110[2];
+	double P_000010010=Pd_010[1]*Pd_010[2];
+	double P_000010110=Pd_010[1]*Pd_110[2];
+	double P_000110010=Pd_110[1]*Pd_010[2];
+	double P_000110110=Pd_110[1]*Pd_110[2];
+	double P_000000020=Pd_020[2];
+	double P_000000120=Pd_120[2];
+	double P_000000220=Pd_220[2];
+				double PR_020000000000=P_020000000*R_000[0]+-1*P_120000000*R_100[0]+P_220000000*R_200[0];
+				double PR_010010000000=P_010010000*R_000[0]+-1*P_010110000*R_010[0]+-1*P_110010000*R_100[0]+P_110110000*R_110[0];
+				double PR_000020000000=P_000020000*R_000[0]+-1*P_000120000*R_010[0]+P_000220000*R_020[0];
+				double PR_010000010000=P_010000010*R_000[0]+-1*P_010000110*R_001[0]+-1*P_110000010*R_100[0]+P_110000110*R_101[0];
+				double PR_000010010000=P_000010010*R_000[0]+-1*P_000010110*R_001[0]+-1*P_000110010*R_010[0]+P_000110110*R_011[0];
+				double PR_000000020000=P_000000020*R_000[0]+-1*P_000000120*R_001[0]+P_000000220*R_002[0];
+			ans_temp[ans_id*6+0]+=PR_020000000000;
+			ans_temp[ans_id*6+1]+=PR_010010000000;
+			ans_temp[ans_id*6+2]+=PR_000020000000;
+			ans_temp[ans_id*6+3]+=PR_010000010000;
+			ans_temp[ans_id*6+4]+=PR_000010010000;
+			ans_temp[ans_id*6+5]+=PR_000000020000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dsss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+		double Pd_110[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_220[3];
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=aPin1*(2.000000*Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_220[i]=aPin1*(Pd_110[i]);
+			}
+	double P_020000000=Pd_020[0];
+	double P_120000000=Pd_120[0];
+	double P_220000000=Pd_220[0];
+	double P_010010000=Pd_010[0]*Pd_010[1];
+	double P_010110000=Pd_010[0]*Pd_110[1];
+	double P_110010000=Pd_110[0]*Pd_010[1];
+	double P_110110000=Pd_110[0]*Pd_110[1];
+	double P_000020000=Pd_020[1];
+	double P_000120000=Pd_120[1];
+	double P_000220000=Pd_220[1];
+	double P_010000010=Pd_010[0]*Pd_010[2];
+	double P_010000110=Pd_010[0]*Pd_110[2];
+	double P_110000010=Pd_110[0]*Pd_010[2];
+	double P_110000110=Pd_110[0]*Pd_110[2];
+	double P_000010010=Pd_010[1]*Pd_010[2];
+	double P_000010110=Pd_010[1]*Pd_110[2];
+	double P_000110010=Pd_110[1]*Pd_010[2];
+	double P_000110110=Pd_110[1]*Pd_110[2];
+	double P_000000020=Pd_020[2];
+	double P_000000120=Pd_120[2];
+	double P_000000220=Pd_220[2];
+			ans_temp[ans_id*6+0]+=P_020000000*QR_000000000000+P_120000000*QR_000000000100+P_220000000*QR_000000000200;
+			ans_temp[ans_id*6+1]+=P_010010000*QR_000000000000+P_010110000*QR_000000000010+P_110010000*QR_000000000100+P_110110000*QR_000000000110;
+			ans_temp[ans_id*6+2]+=P_000020000*QR_000000000000+P_000120000*QR_000000000010+P_000220000*QR_000000000020;
+			ans_temp[ans_id*6+3]+=P_010000010*QR_000000000000+P_010000110*QR_000000000001+P_110000010*QR_000000000100+P_110000110*QR_000000000101;
+			ans_temp[ans_id*6+4]+=P_000010010*QR_000000000000+P_000010110*QR_000000000001+P_000110010*QR_000000000010+P_000110110*QR_000000000011;
+			ans_temp[ans_id*6+5]+=P_000000020*QR_000000000000+P_000000120*QR_000000000001+P_000000220*QR_000000000002;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dsss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_020[3];
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+			double P_020000000;
+			double P_010010000;
+			double P_000020000;
+			double P_010000010;
+			double P_000010010;
+			double P_000000020;
+			double a1P_010000000_1;
+			double a1P_010000000_2;
+			double a1P_000010000_1;
+			double a1P_000010000_2;
+			double a1P_000000010_1;
+			double a1P_000000010_2;
+			P_020000000=Pd_020[0];
+			P_010010000=Pd_010[0]*Pd_010[1];
+			P_000020000=Pd_020[1];
+			P_010000010=Pd_010[0]*Pd_010[2];
+			P_000010010=Pd_010[1]*Pd_010[2];
+			P_000000020=Pd_020[2];
+			a1P_010000000_1=Pd_010[0];
+			a1P_010000000_2=2*a1P_010000000_1;
+			a1P_000010000_1=Pd_010[1];
+			a1P_000010000_2=2*a1P_000010000_1;
+			a1P_000000010_1=Pd_010[2];
+			a1P_000000010_2=2*a1P_000000010_1;
+			double PR_020000000000=P_020000000*R_000[0]+a1P_010000000_2*R_100[0]+aPin2*R_200[0];
+			double PR_010010000000=P_010010000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000010000_1*R_100[0]+aPin2*R_110[0];
+			double PR_000020000000=P_000020000*R_000[0]+a1P_000010000_2*R_010[0]+aPin2*R_020[0];
+			double PR_010000010000=P_010000010*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000010_1*R_100[0]+aPin2*R_101[0];
+			double PR_000010010000=P_000010010*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000010_1*R_010[0]+aPin2*R_011[0];
+			double PR_000000020000=P_000000020*R_000[0]+a1P_000000010_2*R_001[0]+aPin2*R_002[0];
+			ans_temp[ans_id*6+0]+=PR_020000000000;
+			ans_temp[ans_id*6+1]+=PR_010010000000;
+			ans_temp[ans_id*6+2]+=PR_000020000000;
+			ans_temp[ans_id*6+3]+=PR_010000010000;
+			ans_temp[ans_id*6+4]+=PR_000010010000;
+			ans_temp[ans_id*6+5]+=PR_000000020000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dsss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double Pd_020[3];
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+			double P_020000000;
+			double P_010010000;
+			double P_000020000;
+			double P_010000010;
+			double P_000010010;
+			double P_000000020;
+			double a1P_010000000_1;
+			double a1P_010000000_2;
+			double a1P_000010000_1;
+			double a1P_000010000_2;
+			double a1P_000000010_1;
+			double a1P_000000010_2;
+			P_020000000=Pd_020[0];
+			P_010010000=Pd_010[0]*Pd_010[1];
+			P_000020000=Pd_020[1];
+			P_010000010=Pd_010[0]*Pd_010[2];
+			P_000010010=Pd_010[1]*Pd_010[2];
+			P_000000020=Pd_020[2];
+			a1P_010000000_1=Pd_010[0];
+			a1P_010000000_2=2*a1P_010000000_1;
+			a1P_000010000_1=Pd_010[1];
+			a1P_000010000_2=2*a1P_000010000_1;
+			a1P_000000010_1=Pd_010[2];
+			a1P_000000010_2=2*a1P_000000010_1;
+			ans_temp[ans_id*6+0]+=P_020000000*R_000[0]+a1P_010000000_2*R_100[0]+aPin2*R_200[0];
+			ans_temp[ans_id*6+1]+=P_010010000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000010000_1*R_100[0]+aPin2*R_110[0];
+			ans_temp[ans_id*6+2]+=P_000020000*R_000[0]+a1P_000010000_2*R_010[0]+aPin2*R_020[0];
+			ans_temp[ans_id*6+3]+=P_010000010*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000010_1*R_100[0]+aPin2*R_101[0];
+			ans_temp[ans_id*6+4]+=P_000010010*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000010_1*R_010[0]+aPin2*R_011[0];
+			ans_temp[ans_id*6+5]+=P_000000020*R_000[0]+a1P_000000010_2*R_001[0]+aPin2*R_002[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dsss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_020[3];
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+			double P_020000000;
+			double P_010010000;
+			double P_000020000;
+			double P_010000010;
+			double P_000010010;
+			double P_000000020;
+			double a1P_010000000_1;
+			double a1P_010000000_2;
+			double a1P_000010000_1;
+			double a1P_000010000_2;
+			double a1P_000000010_1;
+			double a1P_000000010_2;
+			P_020000000=PD_020[0];
+			P_010010000=PD_010[0]*PD_010[1];
+			P_000020000=PD_020[1];
+			P_010000010=PD_010[0]*PD_010[2];
+			P_000010010=PD_010[1]*PD_010[2];
+			P_000000020=PD_020[2];
+			a1P_010000000_1=PD_010[0];
+			a1P_010000000_2=2*a1P_010000000_1;
+			a1P_000010000_1=PD_010[1];
+			a1P_000010000_2=2*a1P_000010000_1;
+			a1P_000000010_1=PD_010[2];
+			a1P_000000010_2=2*a1P_000000010_1;
+			double PR_020000000000=P_020000000*R_000[0]+a1P_010000000_2*R_100[0]+R_200[0];
+			double PR_010010000000=P_010010000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000010000_1*R_100[0]+R_110[0];
+			double PR_000020000000=P_000020000*R_000[0]+a1P_000010000_2*R_010[0]+R_020[0];
+			double PR_010000010000=P_010000010*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000010_1*R_100[0]+R_101[0];
+			double PR_000010010000=P_000010010*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000010_1*R_010[0]+R_011[0];
+			double PR_000000020000=P_000000020*R_000[0]+a1P_000000010_2*R_001[0]+R_002[0];
+			ans_temp[ans_id*6+0]+=PR_020000000000;
+			ans_temp[ans_id*6+1]+=PR_010010000000;
+			ans_temp[ans_id*6+2]+=PR_000020000000;
+			ans_temp[ans_id*6+3]+=PR_010000010000;
+			ans_temp[ans_id*6+4]+=PR_000010010000;
+			ans_temp[ans_id*6+5]+=PR_000000020000;
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dsss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[1]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<1;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                lmd*=Pmtrx[0];
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[3];
+                Ft_fs_1(2,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	double R_100[2];
+	double R_200[1];
+	double R_010[2];
+	double R_110[1];
+	double R_020[1];
+	double R_001[2];
+	double R_101[1];
+	double R_011[1];
+	double R_002[1];
+	for(int i=0;i<2;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+		double PD_020[3];
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+			double P_020000000;
+			double P_010010000;
+			double P_000020000;
+			double P_010000010;
+			double P_000010010;
+			double P_000000020;
+			double a1P_010000000_1;
+			double a1P_010000000_2;
+			double a1P_000010000_1;
+			double a1P_000010000_2;
+			double a1P_000000010_1;
+			double a1P_000000010_2;
+			P_020000000=PD_020[0];
+			P_010010000=PD_010[0]*PD_010[1];
+			P_000020000=PD_020[1];
+			P_010000010=PD_010[0]*PD_010[2];
+			P_000010010=PD_010[1]*PD_010[2];
+			P_000000020=PD_020[2];
+			a1P_010000000_1=PD_010[0];
+			a1P_010000000_2=2*a1P_010000000_1;
+			a1P_000010000_1=PD_010[1];
+			a1P_000010000_2=2*a1P_000010000_1;
+			a1P_000000010_1=PD_010[2];
+			a1P_000000010_2=2*a1P_000000010_1;
+			ans_temp[ans_id*6+0]+=P_020000000*R_000[0]+a1P_010000000_2*R_100[0]+R_200[0];
+			ans_temp[ans_id*6+1]+=P_010010000*R_000[0]+a1P_010000000_1*R_010[0]+a1P_000010000_1*R_100[0]+R_110[0];
+			ans_temp[ans_id*6+2]+=P_000020000*R_000[0]+a1P_000010000_2*R_010[0]+R_020[0];
+			ans_temp[ans_id*6+3]+=P_010000010*R_000[0]+a1P_010000000_1*R_001[0]+a1P_000000010_1*R_100[0]+R_101[0];
+			ans_temp[ans_id*6+4]+=P_000010010*R_000[0]+a1P_000010000_1*R_001[0]+a1P_000000010_1*R_010[0]+R_011[0];
+			ans_temp[ans_id*6+5]+=P_000000020*R_000[0]+a1P_000000010_2*R_001[0]+R_002[0];
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dpss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double PD_011[3];
+		double PD_111[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=PD_010[i]+PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=aPin1*PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=2*aPin1+PD_010[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=PD_010[i]+PD_111[i];
+			}
+	double P_021000000=PD_021[0];
+	double P_121000000=PD_121[0];
+	double P_221000000=PD_221[0];
+	double P_020001000=PD_020[0]*PD_001[1];
+	double P_020101000=PD_020[0];
+	double P_120001000=PD_120[0]*PD_001[1];
+	double P_120101000=PD_120[0];
+	double P_220001000=PD_001[1];
+	double P_020000001=PD_020[0]*PD_001[2];
+	double P_020000101=PD_020[0];
+	double P_120000001=PD_120[0]*PD_001[2];
+	double P_120000101=PD_120[0];
+	double P_220000001=PD_001[2];
+	double P_011010000=PD_011[0]*PD_010[1];
+	double P_011110000=PD_011[0];
+	double P_111010000=PD_111[0]*PD_010[1];
+	double P_111110000=PD_111[0];
+	double P_211010000=PD_010[1];
+	double P_010011000=PD_010[0]*PD_011[1];
+	double P_010111000=PD_010[0]*PD_111[1];
+	double P_010211000=PD_010[0];
+	double P_110011000=PD_011[1];
+	double P_110111000=PD_111[1];
+	double P_010010001=PD_010[0]*PD_010[1]*PD_001[2];
+	double P_010010101=PD_010[0]*PD_010[1];
+	double P_010110001=PD_010[0]*PD_001[2];
+	double P_010110101=PD_010[0];
+	double P_110010001=PD_010[1]*PD_001[2];
+	double P_110010101=PD_010[1];
+	double P_110110001=PD_001[2];
+	double P_001020000=PD_001[0]*PD_020[1];
+	double P_001120000=PD_001[0]*PD_120[1];
+	double P_001220000=PD_001[0];
+	double P_101020000=PD_020[1];
+	double P_101120000=PD_120[1];
+	double P_000021000=PD_021[1];
+	double P_000121000=PD_121[1];
+	double P_000221000=PD_221[1];
+	double P_000020001=PD_020[1]*PD_001[2];
+	double P_000020101=PD_020[1];
+	double P_000120001=PD_120[1]*PD_001[2];
+	double P_000120101=PD_120[1];
+	double P_000220001=PD_001[2];
+	double P_011000010=PD_011[0]*PD_010[2];
+	double P_011000110=PD_011[0];
+	double P_111000010=PD_111[0]*PD_010[2];
+	double P_111000110=PD_111[0];
+	double P_211000010=PD_010[2];
+	double P_010001010=PD_010[0]*PD_001[1]*PD_010[2];
+	double P_010001110=PD_010[0]*PD_001[1];
+	double P_010101010=PD_010[0]*PD_010[2];
+	double P_010101110=PD_010[0];
+	double P_110001010=PD_001[1]*PD_010[2];
+	double P_110001110=PD_001[1];
+	double P_110101010=PD_010[2];
+	double P_010000011=PD_010[0]*PD_011[2];
+	double P_010000111=PD_010[0]*PD_111[2];
+	double P_010000211=PD_010[0];
+	double P_110000011=PD_011[2];
+	double P_110000111=PD_111[2];
+	double P_001010010=PD_001[0]*PD_010[1]*PD_010[2];
+	double P_001010110=PD_001[0]*PD_010[1];
+	double P_001110010=PD_001[0]*PD_010[2];
+	double P_001110110=PD_001[0];
+	double P_101010010=PD_010[1]*PD_010[2];
+	double P_101010110=PD_010[1];
+	double P_101110010=PD_010[2];
+	double P_000011010=PD_011[1]*PD_010[2];
+	double P_000011110=PD_011[1];
+	double P_000111010=PD_111[1]*PD_010[2];
+	double P_000111110=PD_111[1];
+	double P_000211010=PD_010[2];
+	double P_000010011=PD_010[1]*PD_011[2];
+	double P_000010111=PD_010[1]*PD_111[2];
+	double P_000010211=PD_010[1];
+	double P_000110011=PD_011[2];
+	double P_000110111=PD_111[2];
+	double P_001000020=PD_001[0]*PD_020[2];
+	double P_001000120=PD_001[0]*PD_120[2];
+	double P_001000220=PD_001[0];
+	double P_101000020=PD_020[2];
+	double P_101000120=PD_120[2];
+	double P_000001020=PD_001[1]*PD_020[2];
+	double P_000001120=PD_001[1]*PD_120[2];
+	double P_000001220=PD_001[1];
+	double P_000101020=PD_020[2];
+	double P_000101120=PD_120[2];
+	double P_000000021=PD_021[2];
+	double P_000000121=PD_121[2];
+	double P_000000221=PD_221[2];
+				double PR_021000000000=P_021000000*R_000[0]+-1*P_121000000*R_100[0]+P_221000000*R_200[0]+-1*R_300[0];
+				double PR_020001000000=P_020001000*R_000[0]+-1*P_020101000*R_010[0]+-1*P_120001000*R_100[0]+P_120101000*R_110[0]+P_220001000*R_200[0]+-1*R_210[0];
+				double PR_020000001000=P_020000001*R_000[0]+-1*P_020000101*R_001[0]+-1*P_120000001*R_100[0]+P_120000101*R_101[0]+P_220000001*R_200[0]+-1*R_201[0];
+				double PR_011010000000=P_011010000*R_000[0]+-1*P_011110000*R_010[0]+-1*P_111010000*R_100[0]+P_111110000*R_110[0]+P_211010000*R_200[0]+-1*R_210[0];
+				double PR_010011000000=P_010011000*R_000[0]+-1*P_010111000*R_010[0]+P_010211000*R_020[0]+-1*P_110011000*R_100[0]+P_110111000*R_110[0]+-1*R_120[0];
+				double PR_010010001000=P_010010001*R_000[0]+-1*P_010010101*R_001[0]+-1*P_010110001*R_010[0]+P_010110101*R_011[0]+-1*P_110010001*R_100[0]+P_110010101*R_101[0]+P_110110001*R_110[0]+-1*R_111[0];
+				double PR_001020000000=P_001020000*R_000[0]+-1*P_001120000*R_010[0]+P_001220000*R_020[0]+-1*P_101020000*R_100[0]+P_101120000*R_110[0]+-1*R_120[0];
+				double PR_000021000000=P_000021000*R_000[0]+-1*P_000121000*R_010[0]+P_000221000*R_020[0]+-1*R_030[0];
+				double PR_000020001000=P_000020001*R_000[0]+-1*P_000020101*R_001[0]+-1*P_000120001*R_010[0]+P_000120101*R_011[0]+P_000220001*R_020[0]+-1*R_021[0];
+				double PR_011000010000=P_011000010*R_000[0]+-1*P_011000110*R_001[0]+-1*P_111000010*R_100[0]+P_111000110*R_101[0]+P_211000010*R_200[0]+-1*R_201[0];
+				double PR_010001010000=P_010001010*R_000[0]+-1*P_010001110*R_001[0]+-1*P_010101010*R_010[0]+P_010101110*R_011[0]+-1*P_110001010*R_100[0]+P_110001110*R_101[0]+P_110101010*R_110[0]+-1*R_111[0];
+				double PR_010000011000=P_010000011*R_000[0]+-1*P_010000111*R_001[0]+P_010000211*R_002[0]+-1*P_110000011*R_100[0]+P_110000111*R_101[0]+-1*R_102[0];
+				double PR_001010010000=P_001010010*R_000[0]+-1*P_001010110*R_001[0]+-1*P_001110010*R_010[0]+P_001110110*R_011[0]+-1*P_101010010*R_100[0]+P_101010110*R_101[0]+P_101110010*R_110[0]+-1*R_111[0];
+				double PR_000011010000=P_000011010*R_000[0]+-1*P_000011110*R_001[0]+-1*P_000111010*R_010[0]+P_000111110*R_011[0]+P_000211010*R_020[0]+-1*R_021[0];
+				double PR_000010011000=P_000010011*R_000[0]+-1*P_000010111*R_001[0]+P_000010211*R_002[0]+-1*P_000110011*R_010[0]+P_000110111*R_011[0]+-1*R_012[0];
+				double PR_001000020000=P_001000020*R_000[0]+-1*P_001000120*R_001[0]+P_001000220*R_002[0]+-1*P_101000020*R_100[0]+P_101000120*R_101[0]+-1*R_102[0];
+				double PR_000001020000=P_000001020*R_000[0]+-1*P_000001120*R_001[0]+P_000001220*R_002[0]+-1*P_000101020*R_010[0]+P_000101120*R_011[0]+-1*R_012[0];
+				double PR_000000021000=P_000000021*R_000[0]+-1*P_000000121*R_001[0]+P_000000221*R_002[0]+-1*R_003[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_021000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_020001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020000001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_011010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_010011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010010001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_001020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_000021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000020001000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_011000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_010001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010000011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_001010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_000011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000010011000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_001000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_000001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000000021000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dpss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+				double QR_000000000003=R_003[0];
+				double QR_000000000012=R_012[0];
+				double QR_000000000021=R_021[0];
+				double QR_000000000030=R_030[0];
+				double QR_000000000102=R_102[0];
+				double QR_000000000111=R_111[0];
+				double QR_000000000120=R_120[0];
+				double QR_000000000201=R_201[0];
+				double QR_000000000210=R_210[0];
+				double QR_000000000300=R_300[0];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=PD_010[i]+PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=aPin1*PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=2*aPin1+PD_010[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=PD_010[i]+PD_111[i];
+			}
+	double P_021000000=PD_021[0];
+	double P_121000000=PD_121[0];
+	double P_221000000=PD_221[0];
+	double P_020001000=PD_020[0]*PD_001[1];
+	double P_020101000=PD_020[0];
+	double P_120001000=PD_120[0]*PD_001[1];
+	double P_120101000=PD_120[0];
+	double P_220001000=PD_001[1];
+	double P_020000001=PD_020[0]*PD_001[2];
+	double P_020000101=PD_020[0];
+	double P_120000001=PD_120[0]*PD_001[2];
+	double P_120000101=PD_120[0];
+	double P_220000001=PD_001[2];
+	double P_011010000=PD_011[0]*PD_010[1];
+	double P_011110000=PD_011[0];
+	double P_111010000=PD_111[0]*PD_010[1];
+	double P_111110000=PD_111[0];
+	double P_211010000=PD_010[1];
+	double P_010011000=PD_010[0]*PD_011[1];
+	double P_010111000=PD_010[0]*PD_111[1];
+	double P_010211000=PD_010[0];
+	double P_110011000=PD_011[1];
+	double P_110111000=PD_111[1];
+	double P_010010001=PD_010[0]*PD_010[1]*PD_001[2];
+	double P_010010101=PD_010[0]*PD_010[1];
+	double P_010110001=PD_010[0]*PD_001[2];
+	double P_010110101=PD_010[0];
+	double P_110010001=PD_010[1]*PD_001[2];
+	double P_110010101=PD_010[1];
+	double P_110110001=PD_001[2];
+	double P_001020000=PD_001[0]*PD_020[1];
+	double P_001120000=PD_001[0]*PD_120[1];
+	double P_001220000=PD_001[0];
+	double P_101020000=PD_020[1];
+	double P_101120000=PD_120[1];
+	double P_000021000=PD_021[1];
+	double P_000121000=PD_121[1];
+	double P_000221000=PD_221[1];
+	double P_000020001=PD_020[1]*PD_001[2];
+	double P_000020101=PD_020[1];
+	double P_000120001=PD_120[1]*PD_001[2];
+	double P_000120101=PD_120[1];
+	double P_000220001=PD_001[2];
+	double P_011000010=PD_011[0]*PD_010[2];
+	double P_011000110=PD_011[0];
+	double P_111000010=PD_111[0]*PD_010[2];
+	double P_111000110=PD_111[0];
+	double P_211000010=PD_010[2];
+	double P_010001010=PD_010[0]*PD_001[1]*PD_010[2];
+	double P_010001110=PD_010[0]*PD_001[1];
+	double P_010101010=PD_010[0]*PD_010[2];
+	double P_010101110=PD_010[0];
+	double P_110001010=PD_001[1]*PD_010[2];
+	double P_110001110=PD_001[1];
+	double P_110101010=PD_010[2];
+	double P_010000011=PD_010[0]*PD_011[2];
+	double P_010000111=PD_010[0]*PD_111[2];
+	double P_010000211=PD_010[0];
+	double P_110000011=PD_011[2];
+	double P_110000111=PD_111[2];
+	double P_001010010=PD_001[0]*PD_010[1]*PD_010[2];
+	double P_001010110=PD_001[0]*PD_010[1];
+	double P_001110010=PD_001[0]*PD_010[2];
+	double P_001110110=PD_001[0];
+	double P_101010010=PD_010[1]*PD_010[2];
+	double P_101010110=PD_010[1];
+	double P_101110010=PD_010[2];
+	double P_000011010=PD_011[1]*PD_010[2];
+	double P_000011110=PD_011[1];
+	double P_000111010=PD_111[1]*PD_010[2];
+	double P_000111110=PD_111[1];
+	double P_000211010=PD_010[2];
+	double P_000010011=PD_010[1]*PD_011[2];
+	double P_000010111=PD_010[1]*PD_111[2];
+	double P_000010211=PD_010[1];
+	double P_000110011=PD_011[2];
+	double P_000110111=PD_111[2];
+	double P_001000020=PD_001[0]*PD_020[2];
+	double P_001000120=PD_001[0]*PD_120[2];
+	double P_001000220=PD_001[0];
+	double P_101000020=PD_020[2];
+	double P_101000120=PD_120[2];
+	double P_000001020=PD_001[1]*PD_020[2];
+	double P_000001120=PD_001[1]*PD_120[2];
+	double P_000001220=PD_001[1];
+	double P_000101020=PD_020[2];
+	double P_000101120=PD_120[2];
+	double P_000000021=PD_021[2];
+	double P_000000121=PD_121[2];
+	double P_000000221=PD_221[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_021000000*QR_000000000000+P_121000000*QR_000000000100+P_221000000*QR_000000000200+QR_000000000300);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_020001000*QR_000000000000+P_020101000*QR_000000000010+P_120001000*QR_000000000100+P_120101000*QR_000000000110+P_220001000*QR_000000000200+QR_000000000210);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020000001*QR_000000000000+P_020000101*QR_000000000001+P_120000001*QR_000000000100+P_120000101*QR_000000000101+P_220000001*QR_000000000200+QR_000000000201);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_011010000*QR_000000000000+P_011110000*QR_000000000010+P_111010000*QR_000000000100+P_111110000*QR_000000000110+P_211010000*QR_000000000200+QR_000000000210);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_010011000*QR_000000000000+P_010111000*QR_000000000010+P_010211000*QR_000000000020+P_110011000*QR_000000000100+P_110111000*QR_000000000110+QR_000000000120);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010010001*QR_000000000000+P_010010101*QR_000000000001+P_010110001*QR_000000000010+P_010110101*QR_000000000011+P_110010001*QR_000000000100+P_110010101*QR_000000000101+P_110110001*QR_000000000110+QR_000000000111);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_001020000*QR_000000000000+P_001120000*QR_000000000010+P_001220000*QR_000000000020+P_101020000*QR_000000000100+P_101120000*QR_000000000110+QR_000000000120);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_000021000*QR_000000000000+P_000121000*QR_000000000010+P_000221000*QR_000000000020+QR_000000000030);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000020001*QR_000000000000+P_000020101*QR_000000000001+P_000120001*QR_000000000010+P_000120101*QR_000000000011+P_000220001*QR_000000000020+QR_000000000021);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_011000010*QR_000000000000+P_011000110*QR_000000000001+P_111000010*QR_000000000100+P_111000110*QR_000000000101+P_211000010*QR_000000000200+QR_000000000201);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_010001010*QR_000000000000+P_010001110*QR_000000000001+P_010101010*QR_000000000010+P_010101110*QR_000000000011+P_110001010*QR_000000000100+P_110001110*QR_000000000101+P_110101010*QR_000000000110+QR_000000000111);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010000011*QR_000000000000+P_010000111*QR_000000000001+P_010000211*QR_000000000002+P_110000011*QR_000000000100+P_110000111*QR_000000000101+QR_000000000102);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_001010010*QR_000000000000+P_001010110*QR_000000000001+P_001110010*QR_000000000010+P_001110110*QR_000000000011+P_101010010*QR_000000000100+P_101010110*QR_000000000101+P_101110010*QR_000000000110+QR_000000000111);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_000011010*QR_000000000000+P_000011110*QR_000000000001+P_000111010*QR_000000000010+P_000111110*QR_000000000011+P_000211010*QR_000000000020+QR_000000000021);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000010011*QR_000000000000+P_000010111*QR_000000000001+P_000010211*QR_000000000002+P_000110011*QR_000000000010+P_000110111*QR_000000000011+QR_000000000012);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_001000020*QR_000000000000+P_001000120*QR_000000000001+P_001000220*QR_000000000002+P_101000020*QR_000000000100+P_101000120*QR_000000000101+QR_000000000102);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_000001020*QR_000000000000+P_000001120*QR_000000000001+P_000001220*QR_000000000002+P_000101020*QR_000000000010+P_000101120*QR_000000000011+QR_000000000012);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000000021*QR_000000000000+P_000000121*QR_000000000001+P_000000221*QR_000000000002+QR_000000000003);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dpss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double Pd_101[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_220[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		double Pd_321[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=aPin1*(2.000000*Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_220[i]=aPin1*(Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=aPin1*(2.000000*Pd_011[i]+Pd_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=aPin1*(Pd_111[i]+0.500000*Pd_120[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_321[i]=aPin1*(0.666667*Pd_211[i]+0.333333*Pd_220[i]);
+			}
+	double P_021000000=Pd_021[0];
+	double P_121000000=Pd_121[0];
+	double P_221000000=Pd_221[0];
+	double P_321000000=Pd_321[0];
+	double P_020001000=Pd_020[0]*Pd_001[1];
+	double P_020101000=Pd_020[0]*Pd_101[1];
+	double P_120001000=Pd_120[0]*Pd_001[1];
+	double P_120101000=Pd_120[0]*Pd_101[1];
+	double P_220001000=Pd_220[0]*Pd_001[1];
+	double P_220101000=Pd_220[0]*Pd_101[1];
+	double P_020000001=Pd_020[0]*Pd_001[2];
+	double P_020000101=Pd_020[0]*Pd_101[2];
+	double P_120000001=Pd_120[0]*Pd_001[2];
+	double P_120000101=Pd_120[0]*Pd_101[2];
+	double P_220000001=Pd_220[0]*Pd_001[2];
+	double P_220000101=Pd_220[0]*Pd_101[2];
+	double P_011010000=Pd_011[0]*Pd_010[1];
+	double P_011110000=Pd_011[0]*Pd_110[1];
+	double P_111010000=Pd_111[0]*Pd_010[1];
+	double P_111110000=Pd_111[0]*Pd_110[1];
+	double P_211010000=Pd_211[0]*Pd_010[1];
+	double P_211110000=Pd_211[0]*Pd_110[1];
+	double P_010011000=Pd_010[0]*Pd_011[1];
+	double P_010111000=Pd_010[0]*Pd_111[1];
+	double P_010211000=Pd_010[0]*Pd_211[1];
+	double P_110011000=Pd_110[0]*Pd_011[1];
+	double P_110111000=Pd_110[0]*Pd_111[1];
+	double P_110211000=Pd_110[0]*Pd_211[1];
+	double P_010010001=Pd_010[0]*Pd_010[1]*Pd_001[2];
+	double P_010010101=Pd_010[0]*Pd_010[1]*Pd_101[2];
+	double P_010110001=Pd_010[0]*Pd_110[1]*Pd_001[2];
+	double P_010110101=Pd_010[0]*Pd_110[1]*Pd_101[2];
+	double P_110010001=Pd_110[0]*Pd_010[1]*Pd_001[2];
+	double P_110010101=Pd_110[0]*Pd_010[1]*Pd_101[2];
+	double P_110110001=Pd_110[0]*Pd_110[1]*Pd_001[2];
+	double P_110110101=Pd_110[0]*Pd_110[1]*Pd_101[2];
+	double P_001020000=Pd_001[0]*Pd_020[1];
+	double P_001120000=Pd_001[0]*Pd_120[1];
+	double P_001220000=Pd_001[0]*Pd_220[1];
+	double P_101020000=Pd_101[0]*Pd_020[1];
+	double P_101120000=Pd_101[0]*Pd_120[1];
+	double P_101220000=Pd_101[0]*Pd_220[1];
+	double P_000021000=Pd_021[1];
+	double P_000121000=Pd_121[1];
+	double P_000221000=Pd_221[1];
+	double P_000321000=Pd_321[1];
+	double P_000020001=Pd_020[1]*Pd_001[2];
+	double P_000020101=Pd_020[1]*Pd_101[2];
+	double P_000120001=Pd_120[1]*Pd_001[2];
+	double P_000120101=Pd_120[1]*Pd_101[2];
+	double P_000220001=Pd_220[1]*Pd_001[2];
+	double P_000220101=Pd_220[1]*Pd_101[2];
+	double P_011000010=Pd_011[0]*Pd_010[2];
+	double P_011000110=Pd_011[0]*Pd_110[2];
+	double P_111000010=Pd_111[0]*Pd_010[2];
+	double P_111000110=Pd_111[0]*Pd_110[2];
+	double P_211000010=Pd_211[0]*Pd_010[2];
+	double P_211000110=Pd_211[0]*Pd_110[2];
+	double P_010001010=Pd_010[0]*Pd_001[1]*Pd_010[2];
+	double P_010001110=Pd_010[0]*Pd_001[1]*Pd_110[2];
+	double P_010101010=Pd_010[0]*Pd_101[1]*Pd_010[2];
+	double P_010101110=Pd_010[0]*Pd_101[1]*Pd_110[2];
+	double P_110001010=Pd_110[0]*Pd_001[1]*Pd_010[2];
+	double P_110001110=Pd_110[0]*Pd_001[1]*Pd_110[2];
+	double P_110101010=Pd_110[0]*Pd_101[1]*Pd_010[2];
+	double P_110101110=Pd_110[0]*Pd_101[1]*Pd_110[2];
+	double P_010000011=Pd_010[0]*Pd_011[2];
+	double P_010000111=Pd_010[0]*Pd_111[2];
+	double P_010000211=Pd_010[0]*Pd_211[2];
+	double P_110000011=Pd_110[0]*Pd_011[2];
+	double P_110000111=Pd_110[0]*Pd_111[2];
+	double P_110000211=Pd_110[0]*Pd_211[2];
+	double P_001010010=Pd_001[0]*Pd_010[1]*Pd_010[2];
+	double P_001010110=Pd_001[0]*Pd_010[1]*Pd_110[2];
+	double P_001110010=Pd_001[0]*Pd_110[1]*Pd_010[2];
+	double P_001110110=Pd_001[0]*Pd_110[1]*Pd_110[2];
+	double P_101010010=Pd_101[0]*Pd_010[1]*Pd_010[2];
+	double P_101010110=Pd_101[0]*Pd_010[1]*Pd_110[2];
+	double P_101110010=Pd_101[0]*Pd_110[1]*Pd_010[2];
+	double P_101110110=Pd_101[0]*Pd_110[1]*Pd_110[2];
+	double P_000011010=Pd_011[1]*Pd_010[2];
+	double P_000011110=Pd_011[1]*Pd_110[2];
+	double P_000111010=Pd_111[1]*Pd_010[2];
+	double P_000111110=Pd_111[1]*Pd_110[2];
+	double P_000211010=Pd_211[1]*Pd_010[2];
+	double P_000211110=Pd_211[1]*Pd_110[2];
+	double P_000010011=Pd_010[1]*Pd_011[2];
+	double P_000010111=Pd_010[1]*Pd_111[2];
+	double P_000010211=Pd_010[1]*Pd_211[2];
+	double P_000110011=Pd_110[1]*Pd_011[2];
+	double P_000110111=Pd_110[1]*Pd_111[2];
+	double P_000110211=Pd_110[1]*Pd_211[2];
+	double P_001000020=Pd_001[0]*Pd_020[2];
+	double P_001000120=Pd_001[0]*Pd_120[2];
+	double P_001000220=Pd_001[0]*Pd_220[2];
+	double P_101000020=Pd_101[0]*Pd_020[2];
+	double P_101000120=Pd_101[0]*Pd_120[2];
+	double P_101000220=Pd_101[0]*Pd_220[2];
+	double P_000001020=Pd_001[1]*Pd_020[2];
+	double P_000001120=Pd_001[1]*Pd_120[2];
+	double P_000001220=Pd_001[1]*Pd_220[2];
+	double P_000101020=Pd_101[1]*Pd_020[2];
+	double P_000101120=Pd_101[1]*Pd_120[2];
+	double P_000101220=Pd_101[1]*Pd_220[2];
+	double P_000000021=Pd_021[2];
+	double P_000000121=Pd_121[2];
+	double P_000000221=Pd_221[2];
+	double P_000000321=Pd_321[2];
+				double PR_021000000000=P_021000000*R_000[0]+-1*P_121000000*R_100[0]+P_221000000*R_200[0]+-1*P_321000000*R_300[0];
+				double PR_020001000000=P_020001000*R_000[0]+-1*P_020101000*R_010[0]+-1*P_120001000*R_100[0]+P_120101000*R_110[0]+P_220001000*R_200[0]+-1*P_220101000*R_210[0];
+				double PR_020000001000=P_020000001*R_000[0]+-1*P_020000101*R_001[0]+-1*P_120000001*R_100[0]+P_120000101*R_101[0]+P_220000001*R_200[0]+-1*P_220000101*R_201[0];
+				double PR_011010000000=P_011010000*R_000[0]+-1*P_011110000*R_010[0]+-1*P_111010000*R_100[0]+P_111110000*R_110[0]+P_211010000*R_200[0]+-1*P_211110000*R_210[0];
+				double PR_010011000000=P_010011000*R_000[0]+-1*P_010111000*R_010[0]+P_010211000*R_020[0]+-1*P_110011000*R_100[0]+P_110111000*R_110[0]+-1*P_110211000*R_120[0];
+				double PR_010010001000=P_010010001*R_000[0]+-1*P_010010101*R_001[0]+-1*P_010110001*R_010[0]+P_010110101*R_011[0]+-1*P_110010001*R_100[0]+P_110010101*R_101[0]+P_110110001*R_110[0]+-1*P_110110101*R_111[0];
+				double PR_001020000000=P_001020000*R_000[0]+-1*P_001120000*R_010[0]+P_001220000*R_020[0]+-1*P_101020000*R_100[0]+P_101120000*R_110[0]+-1*P_101220000*R_120[0];
+				double PR_000021000000=P_000021000*R_000[0]+-1*P_000121000*R_010[0]+P_000221000*R_020[0]+-1*P_000321000*R_030[0];
+				double PR_000020001000=P_000020001*R_000[0]+-1*P_000020101*R_001[0]+-1*P_000120001*R_010[0]+P_000120101*R_011[0]+P_000220001*R_020[0]+-1*P_000220101*R_021[0];
+				double PR_011000010000=P_011000010*R_000[0]+-1*P_011000110*R_001[0]+-1*P_111000010*R_100[0]+P_111000110*R_101[0]+P_211000010*R_200[0]+-1*P_211000110*R_201[0];
+				double PR_010001010000=P_010001010*R_000[0]+-1*P_010001110*R_001[0]+-1*P_010101010*R_010[0]+P_010101110*R_011[0]+-1*P_110001010*R_100[0]+P_110001110*R_101[0]+P_110101010*R_110[0]+-1*P_110101110*R_111[0];
+				double PR_010000011000=P_010000011*R_000[0]+-1*P_010000111*R_001[0]+P_010000211*R_002[0]+-1*P_110000011*R_100[0]+P_110000111*R_101[0]+-1*P_110000211*R_102[0];
+				double PR_001010010000=P_001010010*R_000[0]+-1*P_001010110*R_001[0]+-1*P_001110010*R_010[0]+P_001110110*R_011[0]+-1*P_101010010*R_100[0]+P_101010110*R_101[0]+P_101110010*R_110[0]+-1*P_101110110*R_111[0];
+				double PR_000011010000=P_000011010*R_000[0]+-1*P_000011110*R_001[0]+-1*P_000111010*R_010[0]+P_000111110*R_011[0]+P_000211010*R_020[0]+-1*P_000211110*R_021[0];
+				double PR_000010011000=P_000010011*R_000[0]+-1*P_000010111*R_001[0]+P_000010211*R_002[0]+-1*P_000110011*R_010[0]+P_000110111*R_011[0]+-1*P_000110211*R_012[0];
+				double PR_001000020000=P_001000020*R_000[0]+-1*P_001000120*R_001[0]+P_001000220*R_002[0]+-1*P_101000020*R_100[0]+P_101000120*R_101[0]+-1*P_101000220*R_102[0];
+				double PR_000001020000=P_000001020*R_000[0]+-1*P_000001120*R_001[0]+P_000001220*R_002[0]+-1*P_000101020*R_010[0]+P_000101120*R_011[0]+-1*P_000101220*R_012[0];
+				double PR_000000021000=P_000000021*R_000[0]+-1*P_000000121*R_001[0]+P_000000221*R_002[0]+-1*P_000000321*R_003[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_021000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_020001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020000001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_011010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_010011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010010001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_001020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_000021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000020001000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_011000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_010001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010000011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_001010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_000011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000010011000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_001000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_000001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000000021000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dpss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+				double QR_000000000003=R_003[0];
+				double QR_000000000012=R_012[0];
+				double QR_000000000021=R_021[0];
+				double QR_000000000030=R_030[0];
+				double QR_000000000102=R_102[0];
+				double QR_000000000111=R_111[0];
+				double QR_000000000120=R_120[0];
+				double QR_000000000201=R_201[0];
+				double QR_000000000210=R_210[0];
+				double QR_000000000300=R_300[0];
+		double Pd_101[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_220[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		double Pd_321[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=aPin1*(2.000000*Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_220[i]=aPin1*(Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=aPin1*(2.000000*Pd_011[i]+Pd_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=aPin1*(Pd_111[i]+0.500000*Pd_120[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_321[i]=aPin1*(0.666667*Pd_211[i]+0.333333*Pd_220[i]);
+			}
+	double P_021000000=Pd_021[0];
+	double P_121000000=Pd_121[0];
+	double P_221000000=Pd_221[0];
+	double P_321000000=Pd_321[0];
+	double P_020001000=Pd_020[0]*Pd_001[1];
+	double P_020101000=Pd_020[0]*Pd_101[1];
+	double P_120001000=Pd_120[0]*Pd_001[1];
+	double P_120101000=Pd_120[0]*Pd_101[1];
+	double P_220001000=Pd_220[0]*Pd_001[1];
+	double P_220101000=Pd_220[0]*Pd_101[1];
+	double P_020000001=Pd_020[0]*Pd_001[2];
+	double P_020000101=Pd_020[0]*Pd_101[2];
+	double P_120000001=Pd_120[0]*Pd_001[2];
+	double P_120000101=Pd_120[0]*Pd_101[2];
+	double P_220000001=Pd_220[0]*Pd_001[2];
+	double P_220000101=Pd_220[0]*Pd_101[2];
+	double P_011010000=Pd_011[0]*Pd_010[1];
+	double P_011110000=Pd_011[0]*Pd_110[1];
+	double P_111010000=Pd_111[0]*Pd_010[1];
+	double P_111110000=Pd_111[0]*Pd_110[1];
+	double P_211010000=Pd_211[0]*Pd_010[1];
+	double P_211110000=Pd_211[0]*Pd_110[1];
+	double P_010011000=Pd_010[0]*Pd_011[1];
+	double P_010111000=Pd_010[0]*Pd_111[1];
+	double P_010211000=Pd_010[0]*Pd_211[1];
+	double P_110011000=Pd_110[0]*Pd_011[1];
+	double P_110111000=Pd_110[0]*Pd_111[1];
+	double P_110211000=Pd_110[0]*Pd_211[1];
+	double P_010010001=Pd_010[0]*Pd_010[1]*Pd_001[2];
+	double P_010010101=Pd_010[0]*Pd_010[1]*Pd_101[2];
+	double P_010110001=Pd_010[0]*Pd_110[1]*Pd_001[2];
+	double P_010110101=Pd_010[0]*Pd_110[1]*Pd_101[2];
+	double P_110010001=Pd_110[0]*Pd_010[1]*Pd_001[2];
+	double P_110010101=Pd_110[0]*Pd_010[1]*Pd_101[2];
+	double P_110110001=Pd_110[0]*Pd_110[1]*Pd_001[2];
+	double P_110110101=Pd_110[0]*Pd_110[1]*Pd_101[2];
+	double P_001020000=Pd_001[0]*Pd_020[1];
+	double P_001120000=Pd_001[0]*Pd_120[1];
+	double P_001220000=Pd_001[0]*Pd_220[1];
+	double P_101020000=Pd_101[0]*Pd_020[1];
+	double P_101120000=Pd_101[0]*Pd_120[1];
+	double P_101220000=Pd_101[0]*Pd_220[1];
+	double P_000021000=Pd_021[1];
+	double P_000121000=Pd_121[1];
+	double P_000221000=Pd_221[1];
+	double P_000321000=Pd_321[1];
+	double P_000020001=Pd_020[1]*Pd_001[2];
+	double P_000020101=Pd_020[1]*Pd_101[2];
+	double P_000120001=Pd_120[1]*Pd_001[2];
+	double P_000120101=Pd_120[1]*Pd_101[2];
+	double P_000220001=Pd_220[1]*Pd_001[2];
+	double P_000220101=Pd_220[1]*Pd_101[2];
+	double P_011000010=Pd_011[0]*Pd_010[2];
+	double P_011000110=Pd_011[0]*Pd_110[2];
+	double P_111000010=Pd_111[0]*Pd_010[2];
+	double P_111000110=Pd_111[0]*Pd_110[2];
+	double P_211000010=Pd_211[0]*Pd_010[2];
+	double P_211000110=Pd_211[0]*Pd_110[2];
+	double P_010001010=Pd_010[0]*Pd_001[1]*Pd_010[2];
+	double P_010001110=Pd_010[0]*Pd_001[1]*Pd_110[2];
+	double P_010101010=Pd_010[0]*Pd_101[1]*Pd_010[2];
+	double P_010101110=Pd_010[0]*Pd_101[1]*Pd_110[2];
+	double P_110001010=Pd_110[0]*Pd_001[1]*Pd_010[2];
+	double P_110001110=Pd_110[0]*Pd_001[1]*Pd_110[2];
+	double P_110101010=Pd_110[0]*Pd_101[1]*Pd_010[2];
+	double P_110101110=Pd_110[0]*Pd_101[1]*Pd_110[2];
+	double P_010000011=Pd_010[0]*Pd_011[2];
+	double P_010000111=Pd_010[0]*Pd_111[2];
+	double P_010000211=Pd_010[0]*Pd_211[2];
+	double P_110000011=Pd_110[0]*Pd_011[2];
+	double P_110000111=Pd_110[0]*Pd_111[2];
+	double P_110000211=Pd_110[0]*Pd_211[2];
+	double P_001010010=Pd_001[0]*Pd_010[1]*Pd_010[2];
+	double P_001010110=Pd_001[0]*Pd_010[1]*Pd_110[2];
+	double P_001110010=Pd_001[0]*Pd_110[1]*Pd_010[2];
+	double P_001110110=Pd_001[0]*Pd_110[1]*Pd_110[2];
+	double P_101010010=Pd_101[0]*Pd_010[1]*Pd_010[2];
+	double P_101010110=Pd_101[0]*Pd_010[1]*Pd_110[2];
+	double P_101110010=Pd_101[0]*Pd_110[1]*Pd_010[2];
+	double P_101110110=Pd_101[0]*Pd_110[1]*Pd_110[2];
+	double P_000011010=Pd_011[1]*Pd_010[2];
+	double P_000011110=Pd_011[1]*Pd_110[2];
+	double P_000111010=Pd_111[1]*Pd_010[2];
+	double P_000111110=Pd_111[1]*Pd_110[2];
+	double P_000211010=Pd_211[1]*Pd_010[2];
+	double P_000211110=Pd_211[1]*Pd_110[2];
+	double P_000010011=Pd_010[1]*Pd_011[2];
+	double P_000010111=Pd_010[1]*Pd_111[2];
+	double P_000010211=Pd_010[1]*Pd_211[2];
+	double P_000110011=Pd_110[1]*Pd_011[2];
+	double P_000110111=Pd_110[1]*Pd_111[2];
+	double P_000110211=Pd_110[1]*Pd_211[2];
+	double P_001000020=Pd_001[0]*Pd_020[2];
+	double P_001000120=Pd_001[0]*Pd_120[2];
+	double P_001000220=Pd_001[0]*Pd_220[2];
+	double P_101000020=Pd_101[0]*Pd_020[2];
+	double P_101000120=Pd_101[0]*Pd_120[2];
+	double P_101000220=Pd_101[0]*Pd_220[2];
+	double P_000001020=Pd_001[1]*Pd_020[2];
+	double P_000001120=Pd_001[1]*Pd_120[2];
+	double P_000001220=Pd_001[1]*Pd_220[2];
+	double P_000101020=Pd_101[1]*Pd_020[2];
+	double P_000101120=Pd_101[1]*Pd_120[2];
+	double P_000101220=Pd_101[1]*Pd_220[2];
+	double P_000000021=Pd_021[2];
+	double P_000000121=Pd_121[2];
+	double P_000000221=Pd_221[2];
+	double P_000000321=Pd_321[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_021000000*QR_000000000000+P_121000000*QR_000000000100+P_221000000*QR_000000000200+P_321000000*QR_000000000300);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_020001000*QR_000000000000+P_020101000*QR_000000000010+P_120001000*QR_000000000100+P_120101000*QR_000000000110+P_220001000*QR_000000000200+P_220101000*QR_000000000210);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020000001*QR_000000000000+P_020000101*QR_000000000001+P_120000001*QR_000000000100+P_120000101*QR_000000000101+P_220000001*QR_000000000200+P_220000101*QR_000000000201);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_011010000*QR_000000000000+P_011110000*QR_000000000010+P_111010000*QR_000000000100+P_111110000*QR_000000000110+P_211010000*QR_000000000200+P_211110000*QR_000000000210);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_010011000*QR_000000000000+P_010111000*QR_000000000010+P_010211000*QR_000000000020+P_110011000*QR_000000000100+P_110111000*QR_000000000110+P_110211000*QR_000000000120);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010010001*QR_000000000000+P_010010101*QR_000000000001+P_010110001*QR_000000000010+P_010110101*QR_000000000011+P_110010001*QR_000000000100+P_110010101*QR_000000000101+P_110110001*QR_000000000110+P_110110101*QR_000000000111);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_001020000*QR_000000000000+P_001120000*QR_000000000010+P_001220000*QR_000000000020+P_101020000*QR_000000000100+P_101120000*QR_000000000110+P_101220000*QR_000000000120);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_000021000*QR_000000000000+P_000121000*QR_000000000010+P_000221000*QR_000000000020+P_000321000*QR_000000000030);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000020001*QR_000000000000+P_000020101*QR_000000000001+P_000120001*QR_000000000010+P_000120101*QR_000000000011+P_000220001*QR_000000000020+P_000220101*QR_000000000021);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_011000010*QR_000000000000+P_011000110*QR_000000000001+P_111000010*QR_000000000100+P_111000110*QR_000000000101+P_211000010*QR_000000000200+P_211000110*QR_000000000201);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_010001010*QR_000000000000+P_010001110*QR_000000000001+P_010101010*QR_000000000010+P_010101110*QR_000000000011+P_110001010*QR_000000000100+P_110001110*QR_000000000101+P_110101010*QR_000000000110+P_110101110*QR_000000000111);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010000011*QR_000000000000+P_010000111*QR_000000000001+P_010000211*QR_000000000002+P_110000011*QR_000000000100+P_110000111*QR_000000000101+P_110000211*QR_000000000102);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_001010010*QR_000000000000+P_001010110*QR_000000000001+P_001110010*QR_000000000010+P_001110110*QR_000000000011+P_101010010*QR_000000000100+P_101010110*QR_000000000101+P_101110010*QR_000000000110+P_101110110*QR_000000000111);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_000011010*QR_000000000000+P_000011110*QR_000000000001+P_000111010*QR_000000000010+P_000111110*QR_000000000011+P_000211010*QR_000000000020+P_000211110*QR_000000000021);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000010011*QR_000000000000+P_000010111*QR_000000000001+P_000010211*QR_000000000002+P_000110011*QR_000000000010+P_000110111*QR_000000000011+P_000110211*QR_000000000012);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_001000020*QR_000000000000+P_001000120*QR_000000000001+P_001000220*QR_000000000002+P_101000020*QR_000000000100+P_101000120*QR_000000000101+P_101000220*QR_000000000102);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_000001020*QR_000000000000+P_000001120*QR_000000000001+P_000001220*QR_000000000002+P_000101020*QR_000000000010+P_000101120*QR_000000000011+P_000101220*QR_000000000012);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000000021*QR_000000000000+P_000000121*QR_000000000001+P_000000221*QR_000000000002+P_000000321*QR_000000000003);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dpss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=Pd_010[i]*aPin1+aPin1*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=2*aPin2+Pd_010[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=Pd_010[i]*aPin2+aPin1*Pd_111[i];
+			}
+			double P_021000000;
+			double P_121000000;
+			double P_221000000;
+			double P_020001000;
+			double P_020000001;
+			double P_011010000;
+			double P_111010000;
+			double P_010011000;
+			double P_010111000;
+			double P_010010001;
+			double P_001020000;
+			double P_000021000;
+			double P_000121000;
+			double P_000221000;
+			double P_000020001;
+			double P_011000010;
+			double P_111000010;
+			double P_010001010;
+			double P_010000011;
+			double P_010000111;
+			double P_001010010;
+			double P_000011010;
+			double P_000111010;
+			double P_000010011;
+			double P_000010111;
+			double P_001000020;
+			double P_000001020;
+			double P_000000021;
+			double P_000000121;
+			double P_000000221;
+			double a1P_020000000_1;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a2P_010000000_2;
+			double a2P_000001000_1;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a2P_000000001_1;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000010000_1;
+			double a2P_000010000_2;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_010010000_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a1P_000020000_1;
+			double a2P_000000010_1;
+			double a2P_000000010_2;
+			double a1P_010000010_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a1P_000010010_1;
+			double a1P_000000020_1;
+			P_021000000=Pd_021[0];
+			P_121000000=Pd_121[0];
+			P_221000000=Pd_221[0];
+			P_020001000=Pd_020[0]*Pd_001[1];
+			P_020000001=Pd_020[0]*Pd_001[2];
+			P_011010000=Pd_011[0]*Pd_010[1];
+			P_111010000=Pd_111[0]*Pd_010[1];
+			P_010011000=Pd_010[0]*Pd_011[1];
+			P_010111000=Pd_010[0]*Pd_111[1];
+			P_010010001=Pd_010[0]*Pd_010[1]*Pd_001[2];
+			P_001020000=Pd_001[0]*Pd_020[1];
+			P_000021000=Pd_021[1];
+			P_000121000=Pd_121[1];
+			P_000221000=Pd_221[1];
+			P_000020001=Pd_020[1]*Pd_001[2];
+			P_011000010=Pd_011[0]*Pd_010[2];
+			P_111000010=Pd_111[0]*Pd_010[2];
+			P_010001010=Pd_010[0]*Pd_001[1]*Pd_010[2];
+			P_010000011=Pd_010[0]*Pd_011[2];
+			P_010000111=Pd_010[0]*Pd_111[2];
+			P_001010010=Pd_001[0]*Pd_010[1]*Pd_010[2];
+			P_000011010=Pd_011[1]*Pd_010[2];
+			P_000111010=Pd_111[1]*Pd_010[2];
+			P_000010011=Pd_010[1]*Pd_011[2];
+			P_000010111=Pd_010[1]*Pd_111[2];
+			P_001000020=Pd_001[0]*Pd_020[2];
+			P_000001020=Pd_001[1]*Pd_020[2];
+			P_000000021=Pd_021[2];
+			P_000000121=Pd_121[2];
+			P_000000221=Pd_221[2];
+			a1P_020000000_1=Pd_020[0];
+			a1P_010001000_1=Pd_010[0]*Pd_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=Pd_010[0];
+			a2P_010000000_2=2*a2P_010000000_1;
+			a2P_000001000_1=Pd_001[1];
+			a1P_010000001_1=Pd_010[0]*Pd_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a2P_000000001_1=Pd_001[2];
+			a1P_011000000_1=Pd_011[0];
+			a1P_111000000_1=Pd_111[0];
+			a2P_000010000_1=Pd_010[1];
+			a2P_000010000_2=2*a2P_000010000_1;
+			a1P_000011000_1=Pd_011[1];
+			a1P_000111000_1=Pd_111[1];
+			a1P_010010000_1=Pd_010[0]*Pd_010[1];
+			a1P_000010001_1=Pd_010[1]*Pd_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001010000_1=Pd_001[0]*Pd_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=Pd_001[0];
+			a1P_000020000_1=Pd_020[1];
+			a2P_000000010_1=Pd_010[2];
+			a2P_000000010_2=2*a2P_000000010_1;
+			a1P_010000010_1=Pd_010[0]*Pd_010[2];
+			a1P_000001010_1=Pd_001[1]*Pd_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=Pd_011[2];
+			a1P_000000111_1=Pd_111[2];
+			a1P_001000010_1=Pd_001[0]*Pd_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a1P_000010010_1=Pd_010[1]*Pd_010[2];
+			a1P_000000020_1=Pd_020[2];
+			double PR_021000000000=P_021000000*R_000[0]+P_121000000*R_100[0]+P_221000000*R_200[0]+aPin3*R_300[0];
+			double PR_020001000000=P_020001000*R_000[0]+a1P_020000000_1*R_010[0]+a1P_010001000_2*R_100[0]+a2P_010000000_2*R_110[0]+a2P_000001000_1*R_200[0]+aPin3*R_210[0];
+			double PR_020000001000=P_020000001*R_000[0]+a1P_020000000_1*R_001[0]+a1P_010000001_2*R_100[0]+a2P_010000000_2*R_101[0]+a2P_000000001_1*R_200[0]+aPin3*R_201[0];
+			double PR_011010000000=P_011010000*R_000[0]+a1P_011000000_1*R_010[0]+P_111010000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000010000_1*R_200[0]+aPin3*R_210[0];
+			double PR_010011000000=P_010011000*R_000[0]+P_010111000*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+aPin3*R_120[0];
+			double PR_010010001000=P_010010001*R_000[0]+a1P_010010000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+aPin3*R_111[0];
+			double PR_001020000000=P_001020000*R_000[0]+a1P_001010000_2*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000020000_1*R_100[0]+a2P_000010000_2*R_110[0]+aPin3*R_120[0];
+			double PR_000021000000=P_000021000*R_000[0]+P_000121000*R_010[0]+P_000221000*R_020[0]+aPin3*R_030[0];
+			double PR_000020001000=P_000020001*R_000[0]+a1P_000020000_1*R_001[0]+a1P_000010001_2*R_010[0]+a2P_000010000_2*R_011[0]+a2P_000000001_1*R_020[0]+aPin3*R_021[0];
+			double PR_011000010000=P_011000010*R_000[0]+a1P_011000000_1*R_001[0]+P_111000010*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000010_1*R_200[0]+aPin3*R_201[0];
+			double PR_010001010000=P_010001010*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000010_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+aPin3*R_111[0];
+			double PR_010000011000=P_010000011*R_000[0]+P_010000111*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+aPin3*R_102[0];
+			double PR_001010010000=P_001010010*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010010_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000010_1*R_110[0]+aPin3*R_111[0];
+			double PR_000011010000=P_000011010*R_000[0]+a1P_000011000_1*R_001[0]+P_000111010*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000010_1*R_020[0]+aPin3*R_021[0];
+			double PR_000010011000=P_000010011*R_000[0]+P_000010111*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+aPin3*R_012[0];
+			double PR_001000020000=P_001000020*R_000[0]+a1P_001000010_2*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000020_1*R_100[0]+a2P_000000010_2*R_101[0]+aPin3*R_102[0];
+			double PR_000001020000=P_000001020*R_000[0]+a1P_000001010_2*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000020_1*R_010[0]+a2P_000000010_2*R_011[0]+aPin3*R_012[0];
+			double PR_000000021000=P_000000021*R_000[0]+P_000000121*R_001[0]+P_000000221*R_002[0]+aPin3*R_003[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_021000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_020001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020000001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_011010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_010011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010010001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_001020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_000021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000020001000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_011000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_010001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010000011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_001010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_000011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000010011000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_001000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_000001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000000021000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dpss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=Pd_010[i]*aPin1+aPin1*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=2*aPin2+Pd_010[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=Pd_010[i]*aPin2+aPin1*Pd_111[i];
+			}
+			double P_021000000;
+			double P_121000000;
+			double P_221000000;
+			double P_020001000;
+			double P_020000001;
+			double P_011010000;
+			double P_111010000;
+			double P_010011000;
+			double P_010111000;
+			double P_010010001;
+			double P_001020000;
+			double P_000021000;
+			double P_000121000;
+			double P_000221000;
+			double P_000020001;
+			double P_011000010;
+			double P_111000010;
+			double P_010001010;
+			double P_010000011;
+			double P_010000111;
+			double P_001010010;
+			double P_000011010;
+			double P_000111010;
+			double P_000010011;
+			double P_000010111;
+			double P_001000020;
+			double P_000001020;
+			double P_000000021;
+			double P_000000121;
+			double P_000000221;
+			double a1P_020000000_1;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a2P_010000000_2;
+			double a2P_000001000_1;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a2P_000000001_1;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000010000_1;
+			double a2P_000010000_2;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_010010000_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a1P_000020000_1;
+			double a2P_000000010_1;
+			double a2P_000000010_2;
+			double a1P_010000010_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a1P_000010010_1;
+			double a1P_000000020_1;
+			P_021000000=Pd_021[0];
+			P_121000000=Pd_121[0];
+			P_221000000=Pd_221[0];
+			P_020001000=Pd_020[0]*Pd_001[1];
+			P_020000001=Pd_020[0]*Pd_001[2];
+			P_011010000=Pd_011[0]*Pd_010[1];
+			P_111010000=Pd_111[0]*Pd_010[1];
+			P_010011000=Pd_010[0]*Pd_011[1];
+			P_010111000=Pd_010[0]*Pd_111[1];
+			P_010010001=Pd_010[0]*Pd_010[1]*Pd_001[2];
+			P_001020000=Pd_001[0]*Pd_020[1];
+			P_000021000=Pd_021[1];
+			P_000121000=Pd_121[1];
+			P_000221000=Pd_221[1];
+			P_000020001=Pd_020[1]*Pd_001[2];
+			P_011000010=Pd_011[0]*Pd_010[2];
+			P_111000010=Pd_111[0]*Pd_010[2];
+			P_010001010=Pd_010[0]*Pd_001[1]*Pd_010[2];
+			P_010000011=Pd_010[0]*Pd_011[2];
+			P_010000111=Pd_010[0]*Pd_111[2];
+			P_001010010=Pd_001[0]*Pd_010[1]*Pd_010[2];
+			P_000011010=Pd_011[1]*Pd_010[2];
+			P_000111010=Pd_111[1]*Pd_010[2];
+			P_000010011=Pd_010[1]*Pd_011[2];
+			P_000010111=Pd_010[1]*Pd_111[2];
+			P_001000020=Pd_001[0]*Pd_020[2];
+			P_000001020=Pd_001[1]*Pd_020[2];
+			P_000000021=Pd_021[2];
+			P_000000121=Pd_121[2];
+			P_000000221=Pd_221[2];
+			a1P_020000000_1=Pd_020[0];
+			a1P_010001000_1=Pd_010[0]*Pd_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=Pd_010[0];
+			a2P_010000000_2=2*a2P_010000000_1;
+			a2P_000001000_1=Pd_001[1];
+			a1P_010000001_1=Pd_010[0]*Pd_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a2P_000000001_1=Pd_001[2];
+			a1P_011000000_1=Pd_011[0];
+			a1P_111000000_1=Pd_111[0];
+			a2P_000010000_1=Pd_010[1];
+			a2P_000010000_2=2*a2P_000010000_1;
+			a1P_000011000_1=Pd_011[1];
+			a1P_000111000_1=Pd_111[1];
+			a1P_010010000_1=Pd_010[0]*Pd_010[1];
+			a1P_000010001_1=Pd_010[1]*Pd_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001010000_1=Pd_001[0]*Pd_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=Pd_001[0];
+			a1P_000020000_1=Pd_020[1];
+			a2P_000000010_1=Pd_010[2];
+			a2P_000000010_2=2*a2P_000000010_1;
+			a1P_010000010_1=Pd_010[0]*Pd_010[2];
+			a1P_000001010_1=Pd_001[1]*Pd_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=Pd_011[2];
+			a1P_000000111_1=Pd_111[2];
+			a1P_001000010_1=Pd_001[0]*Pd_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a1P_000010010_1=Pd_010[1]*Pd_010[2];
+			a1P_000000020_1=Pd_020[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_021000000*R_000[0]+P_121000000*R_100[0]+P_221000000*R_200[0]+aPin3*R_300[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_020001000*R_000[0]+a1P_020000000_1*R_010[0]+a1P_010001000_2*R_100[0]+a2P_010000000_2*R_110[0]+a2P_000001000_1*R_200[0]+aPin3*R_210[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020000001*R_000[0]+a1P_020000000_1*R_001[0]+a1P_010000001_2*R_100[0]+a2P_010000000_2*R_101[0]+a2P_000000001_1*R_200[0]+aPin3*R_201[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_011010000*R_000[0]+a1P_011000000_1*R_010[0]+P_111010000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000010000_1*R_200[0]+aPin3*R_210[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_010011000*R_000[0]+P_010111000*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+aPin3*R_120[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010010001*R_000[0]+a1P_010010000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+aPin3*R_111[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_001020000*R_000[0]+a1P_001010000_2*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000020000_1*R_100[0]+a2P_000010000_2*R_110[0]+aPin3*R_120[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_000021000*R_000[0]+P_000121000*R_010[0]+P_000221000*R_020[0]+aPin3*R_030[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000020001*R_000[0]+a1P_000020000_1*R_001[0]+a1P_000010001_2*R_010[0]+a2P_000010000_2*R_011[0]+a2P_000000001_1*R_020[0]+aPin3*R_021[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_011000010*R_000[0]+a1P_011000000_1*R_001[0]+P_111000010*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000010_1*R_200[0]+aPin3*R_201[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_010001010*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000010_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+aPin3*R_111[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010000011*R_000[0]+P_010000111*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+aPin3*R_102[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_001010010*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010010_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000010_1*R_110[0]+aPin3*R_111[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_000011010*R_000[0]+a1P_000011000_1*R_001[0]+P_000111010*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000010_1*R_020[0]+aPin3*R_021[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000010011*R_000[0]+P_000010111*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+aPin3*R_012[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_001000020*R_000[0]+a1P_001000010_2*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000020_1*R_100[0]+a2P_000000010_2*R_101[0]+aPin3*R_102[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_000001020*R_000[0]+a1P_000001010_2*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000020_1*R_010[0]+a2P_000000010_2*R_011[0]+aPin3*R_012[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000000021*R_000[0]+P_000000121*R_001[0]+P_000000221*R_002[0]+aPin3*R_003[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_dpss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double PD_011[3];
+		double PD_111[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=(2.000000*PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=(2.000000*PD_011[i]+PD_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=(PD_111[i]+0.500000*PD_120[i]);
+			}
+			double P_021000000;
+			double P_121000000;
+			double P_221000000;
+			double P_020001000;
+			double P_020000001;
+			double P_011010000;
+			double P_111010000;
+			double P_010011000;
+			double P_010111000;
+			double P_010010001;
+			double P_001020000;
+			double P_000021000;
+			double P_000121000;
+			double P_000221000;
+			double P_000020001;
+			double P_011000010;
+			double P_111000010;
+			double P_010001010;
+			double P_010000011;
+			double P_010000111;
+			double P_001010010;
+			double P_000011010;
+			double P_000111010;
+			double P_000010011;
+			double P_000010111;
+			double P_001000020;
+			double P_000001020;
+			double P_000000021;
+			double P_000000121;
+			double P_000000221;
+			double a1P_020000000_1;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a2P_010000000_2;
+			double a2P_000001000_1;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a2P_000000001_1;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000010000_1;
+			double a2P_000010000_2;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_010010000_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a1P_000020000_1;
+			double a2P_000000010_1;
+			double a2P_000000010_2;
+			double a1P_010000010_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a1P_000010010_1;
+			double a1P_000000020_1;
+			P_021000000=PD_021[0];
+			P_121000000=PD_121[0];
+			P_221000000=PD_221[0];
+			P_020001000=PD_020[0]*PD_001[1];
+			P_020000001=PD_020[0]*PD_001[2];
+			P_011010000=PD_011[0]*PD_010[1];
+			P_111010000=PD_111[0]*PD_010[1];
+			P_010011000=PD_010[0]*PD_011[1];
+			P_010111000=PD_010[0]*PD_111[1];
+			P_010010001=PD_010[0]*PD_010[1]*PD_001[2];
+			P_001020000=PD_001[0]*PD_020[1];
+			P_000021000=PD_021[1];
+			P_000121000=PD_121[1];
+			P_000221000=PD_221[1];
+			P_000020001=PD_020[1]*PD_001[2];
+			P_011000010=PD_011[0]*PD_010[2];
+			P_111000010=PD_111[0]*PD_010[2];
+			P_010001010=PD_010[0]*PD_001[1]*PD_010[2];
+			P_010000011=PD_010[0]*PD_011[2];
+			P_010000111=PD_010[0]*PD_111[2];
+			P_001010010=PD_001[0]*PD_010[1]*PD_010[2];
+			P_000011010=PD_011[1]*PD_010[2];
+			P_000111010=PD_111[1]*PD_010[2];
+			P_000010011=PD_010[1]*PD_011[2];
+			P_000010111=PD_010[1]*PD_111[2];
+			P_001000020=PD_001[0]*PD_020[2];
+			P_000001020=PD_001[1]*PD_020[2];
+			P_000000021=PD_021[2];
+			P_000000121=PD_121[2];
+			P_000000221=PD_221[2];
+			a1P_020000000_1=PD_020[0];
+			a1P_010001000_1=PD_010[0]*PD_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=PD_010[0];
+			a2P_010000000_2=2*a2P_010000000_1;
+			a2P_000001000_1=PD_001[1];
+			a1P_010000001_1=PD_010[0]*PD_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a2P_000000001_1=PD_001[2];
+			a1P_011000000_1=PD_011[0];
+			a1P_111000000_1=PD_111[0];
+			a2P_000010000_1=PD_010[1];
+			a2P_000010000_2=2*a2P_000010000_1;
+			a1P_000011000_1=PD_011[1];
+			a1P_000111000_1=PD_111[1];
+			a1P_010010000_1=PD_010[0]*PD_010[1];
+			a1P_000010001_1=PD_010[1]*PD_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001010000_1=PD_001[0]*PD_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=PD_001[0];
+			a1P_000020000_1=PD_020[1];
+			a2P_000000010_1=PD_010[2];
+			a2P_000000010_2=2*a2P_000000010_1;
+			a1P_010000010_1=PD_010[0]*PD_010[2];
+			a1P_000001010_1=PD_001[1]*PD_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=PD_011[2];
+			a1P_000000111_1=PD_111[2];
+			a1P_001000010_1=PD_001[0]*PD_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a1P_000010010_1=PD_010[1]*PD_010[2];
+			a1P_000000020_1=PD_020[2];
+			double PR_021000000000=P_021000000*R_000[0]+P_121000000*R_100[0]+P_221000000*R_200[0]+R_300[0];
+			double PR_020001000000=P_020001000*R_000[0]+a1P_020000000_1*R_010[0]+a1P_010001000_2*R_100[0]+a2P_010000000_2*R_110[0]+a2P_000001000_1*R_200[0]+R_210[0];
+			double PR_020000001000=P_020000001*R_000[0]+a1P_020000000_1*R_001[0]+a1P_010000001_2*R_100[0]+a2P_010000000_2*R_101[0]+a2P_000000001_1*R_200[0]+R_201[0];
+			double PR_011010000000=P_011010000*R_000[0]+a1P_011000000_1*R_010[0]+P_111010000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000010000_1*R_200[0]+R_210[0];
+			double PR_010011000000=P_010011000*R_000[0]+P_010111000*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+R_120[0];
+			double PR_010010001000=P_010010001*R_000[0]+a1P_010010000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+R_111[0];
+			double PR_001020000000=P_001020000*R_000[0]+a1P_001010000_2*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000020000_1*R_100[0]+a2P_000010000_2*R_110[0]+R_120[0];
+			double PR_000021000000=P_000021000*R_000[0]+P_000121000*R_010[0]+P_000221000*R_020[0]+R_030[0];
+			double PR_000020001000=P_000020001*R_000[0]+a1P_000020000_1*R_001[0]+a1P_000010001_2*R_010[0]+a2P_000010000_2*R_011[0]+a2P_000000001_1*R_020[0]+R_021[0];
+			double PR_011000010000=P_011000010*R_000[0]+a1P_011000000_1*R_001[0]+P_111000010*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000010_1*R_200[0]+R_201[0];
+			double PR_010001010000=P_010001010*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000010_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+R_111[0];
+			double PR_010000011000=P_010000011*R_000[0]+P_010000111*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+R_102[0];
+			double PR_001010010000=P_001010010*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010010_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000010_1*R_110[0]+R_111[0];
+			double PR_000011010000=P_000011010*R_000[0]+a1P_000011000_1*R_001[0]+P_000111010*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000010_1*R_020[0]+R_021[0];
+			double PR_000010011000=P_000010011*R_000[0]+P_000010111*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+R_012[0];
+			double PR_001000020000=P_001000020*R_000[0]+a1P_001000010_2*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000020_1*R_100[0]+a2P_000000010_2*R_101[0]+R_102[0];
+			double PR_000001020000=P_000001020*R_000[0]+a1P_000001010_2*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000020_1*R_010[0]+a2P_000000010_2*R_011[0]+R_012[0];
+			double PR_000000021000=P_000000021*R_000[0]+P_000000121*R_001[0]+P_000000221*R_002[0]+R_003[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_021000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_020001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020000001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_011010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_010011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010010001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_001020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_000021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000020001000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_011000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_010001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010000011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_001010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_000011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000010011000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_001000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_000001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000000021000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_dpss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[3]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<3;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[4];
+                Ft_fs_3(3,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	double R_100[3];
+	double R_200[2];
+	double R_300[1];
+	double R_010[3];
+	double R_110[2];
+	double R_210[1];
+	double R_020[2];
+	double R_120[1];
+	double R_030[1];
+	double R_001[3];
+	double R_101[2];
+	double R_201[1];
+	double R_011[2];
+	double R_111[1];
+	double R_021[1];
+	double R_002[2];
+	double R_102[1];
+	double R_012[1];
+	double R_003[1];
+	for(int i=0;i<3;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+		double PD_011[3];
+		double PD_111[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=(2.000000*PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=(2.000000*PD_011[i]+PD_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=(PD_111[i]+0.500000*PD_120[i]);
+			}
+			double P_021000000;
+			double P_121000000;
+			double P_221000000;
+			double P_020001000;
+			double P_020000001;
+			double P_011010000;
+			double P_111010000;
+			double P_010011000;
+			double P_010111000;
+			double P_010010001;
+			double P_001020000;
+			double P_000021000;
+			double P_000121000;
+			double P_000221000;
+			double P_000020001;
+			double P_011000010;
+			double P_111000010;
+			double P_010001010;
+			double P_010000011;
+			double P_010000111;
+			double P_001010010;
+			double P_000011010;
+			double P_000111010;
+			double P_000010011;
+			double P_000010111;
+			double P_001000020;
+			double P_000001020;
+			double P_000000021;
+			double P_000000121;
+			double P_000000221;
+			double a1P_020000000_1;
+			double a1P_010001000_1;
+			double a1P_010001000_2;
+			double a2P_010000000_1;
+			double a2P_010000000_2;
+			double a2P_000001000_1;
+			double a1P_010000001_1;
+			double a1P_010000001_2;
+			double a2P_000000001_1;
+			double a1P_011000000_1;
+			double a1P_111000000_1;
+			double a2P_000010000_1;
+			double a2P_000010000_2;
+			double a1P_000011000_1;
+			double a1P_000111000_1;
+			double a1P_010010000_1;
+			double a1P_000010001_1;
+			double a1P_000010001_2;
+			double a1P_001010000_1;
+			double a1P_001010000_2;
+			double a2P_001000000_1;
+			double a1P_000020000_1;
+			double a2P_000000010_1;
+			double a2P_000000010_2;
+			double a1P_010000010_1;
+			double a1P_000001010_1;
+			double a1P_000001010_2;
+			double a1P_000000011_1;
+			double a1P_000000111_1;
+			double a1P_001000010_1;
+			double a1P_001000010_2;
+			double a1P_000010010_1;
+			double a1P_000000020_1;
+			P_021000000=PD_021[0];
+			P_121000000=PD_121[0];
+			P_221000000=PD_221[0];
+			P_020001000=PD_020[0]*PD_001[1];
+			P_020000001=PD_020[0]*PD_001[2];
+			P_011010000=PD_011[0]*PD_010[1];
+			P_111010000=PD_111[0]*PD_010[1];
+			P_010011000=PD_010[0]*PD_011[1];
+			P_010111000=PD_010[0]*PD_111[1];
+			P_010010001=PD_010[0]*PD_010[1]*PD_001[2];
+			P_001020000=PD_001[0]*PD_020[1];
+			P_000021000=PD_021[1];
+			P_000121000=PD_121[1];
+			P_000221000=PD_221[1];
+			P_000020001=PD_020[1]*PD_001[2];
+			P_011000010=PD_011[0]*PD_010[2];
+			P_111000010=PD_111[0]*PD_010[2];
+			P_010001010=PD_010[0]*PD_001[1]*PD_010[2];
+			P_010000011=PD_010[0]*PD_011[2];
+			P_010000111=PD_010[0]*PD_111[2];
+			P_001010010=PD_001[0]*PD_010[1]*PD_010[2];
+			P_000011010=PD_011[1]*PD_010[2];
+			P_000111010=PD_111[1]*PD_010[2];
+			P_000010011=PD_010[1]*PD_011[2];
+			P_000010111=PD_010[1]*PD_111[2];
+			P_001000020=PD_001[0]*PD_020[2];
+			P_000001020=PD_001[1]*PD_020[2];
+			P_000000021=PD_021[2];
+			P_000000121=PD_121[2];
+			P_000000221=PD_221[2];
+			a1P_020000000_1=PD_020[0];
+			a1P_010001000_1=PD_010[0]*PD_001[1];
+			a1P_010001000_2=2*a1P_010001000_1;
+			a2P_010000000_1=PD_010[0];
+			a2P_010000000_2=2*a2P_010000000_1;
+			a2P_000001000_1=PD_001[1];
+			a1P_010000001_1=PD_010[0]*PD_001[2];
+			a1P_010000001_2=2*a1P_010000001_1;
+			a2P_000000001_1=PD_001[2];
+			a1P_011000000_1=PD_011[0];
+			a1P_111000000_1=PD_111[0];
+			a2P_000010000_1=PD_010[1];
+			a2P_000010000_2=2*a2P_000010000_1;
+			a1P_000011000_1=PD_011[1];
+			a1P_000111000_1=PD_111[1];
+			a1P_010010000_1=PD_010[0]*PD_010[1];
+			a1P_000010001_1=PD_010[1]*PD_001[2];
+			a1P_000010001_2=2*a1P_000010001_1;
+			a1P_001010000_1=PD_001[0]*PD_010[1];
+			a1P_001010000_2=2*a1P_001010000_1;
+			a2P_001000000_1=PD_001[0];
+			a1P_000020000_1=PD_020[1];
+			a2P_000000010_1=PD_010[2];
+			a2P_000000010_2=2*a2P_000000010_1;
+			a1P_010000010_1=PD_010[0]*PD_010[2];
+			a1P_000001010_1=PD_001[1]*PD_010[2];
+			a1P_000001010_2=2*a1P_000001010_1;
+			a1P_000000011_1=PD_011[2];
+			a1P_000000111_1=PD_111[2];
+			a1P_001000010_1=PD_001[0]*PD_010[2];
+			a1P_001000010_2=2*a1P_001000010_1;
+			a1P_000010010_1=PD_010[1]*PD_010[2];
+			a1P_000000020_1=PD_020[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_021000000*R_000[0]+P_121000000*R_100[0]+P_221000000*R_200[0]+R_300[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_020001000*R_000[0]+a1P_020000000_1*R_010[0]+a1P_010001000_2*R_100[0]+a2P_010000000_2*R_110[0]+a2P_000001000_1*R_200[0]+R_210[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020000001*R_000[0]+a1P_020000000_1*R_001[0]+a1P_010000001_2*R_100[0]+a2P_010000000_2*R_101[0]+a2P_000000001_1*R_200[0]+R_201[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_011010000*R_000[0]+a1P_011000000_1*R_010[0]+P_111010000*R_100[0]+a1P_111000000_1*R_110[0]+a2P_000010000_1*R_200[0]+R_210[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_010011000*R_000[0]+P_010111000*R_010[0]+a2P_010000000_1*R_020[0]+a1P_000011000_1*R_100[0]+a1P_000111000_1*R_110[0]+R_120[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010010001*R_000[0]+a1P_010010000_1*R_001[0]+a1P_010000001_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000010001_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000001_1*R_110[0]+R_111[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_001020000*R_000[0]+a1P_001010000_2*R_010[0]+a2P_001000000_1*R_020[0]+a1P_000020000_1*R_100[0]+a2P_000010000_2*R_110[0]+R_120[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_000021000*R_000[0]+P_000121000*R_010[0]+P_000221000*R_020[0]+R_030[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000020001*R_000[0]+a1P_000020000_1*R_001[0]+a1P_000010001_2*R_010[0]+a2P_000010000_2*R_011[0]+a2P_000000001_1*R_020[0]+R_021[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_011000010*R_000[0]+a1P_011000000_1*R_001[0]+P_111000010*R_100[0]+a1P_111000000_1*R_101[0]+a2P_000000010_1*R_200[0]+R_201[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_010001010*R_000[0]+a1P_010001000_1*R_001[0]+a1P_010000010_1*R_010[0]+a2P_010000000_1*R_011[0]+a1P_000001010_1*R_100[0]+a2P_000001000_1*R_101[0]+a2P_000000010_1*R_110[0]+R_111[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010000011*R_000[0]+P_010000111*R_001[0]+a2P_010000000_1*R_002[0]+a1P_000000011_1*R_100[0]+a1P_000000111_1*R_101[0]+R_102[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_001010010*R_000[0]+a1P_001010000_1*R_001[0]+a1P_001000010_1*R_010[0]+a2P_001000000_1*R_011[0]+a1P_000010010_1*R_100[0]+a2P_000010000_1*R_101[0]+a2P_000000010_1*R_110[0]+R_111[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_000011010*R_000[0]+a1P_000011000_1*R_001[0]+P_000111010*R_010[0]+a1P_000111000_1*R_011[0]+a2P_000000010_1*R_020[0]+R_021[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000010011*R_000[0]+P_000010111*R_001[0]+a2P_000010000_1*R_002[0]+a1P_000000011_1*R_010[0]+a1P_000000111_1*R_011[0]+R_012[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_001000020*R_000[0]+a1P_001000010_2*R_001[0]+a2P_001000000_1*R_002[0]+a1P_000000020_1*R_100[0]+a2P_000000010_2*R_101[0]+R_102[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_000001020*R_000[0]+a1P_000001010_2*R_001[0]+a2P_000001000_1*R_002[0]+a1P_000000020_1*R_010[0]+a2P_000000010_2*R_011[0]+R_012[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000000021*R_000[0]+P_000000121*R_001[0]+P_000000221*R_002[0]+R_003[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ddss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	R_000[4]*=aPin4;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<4;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_200[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_020[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_002[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		double PD_022[3];
+		double PD_122[3];
+		double PD_222[3];
+		double PD_322[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=PD_001[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=aPin1*PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=2*aPin1+PD_001[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=PD_001[i]+PD_111[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=PD_010[i]+PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=aPin1*PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=2*aPin1+PD_010[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=PD_010[i]+PD_111[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_022[i]=aPin1*PD_112[i]+PD_010[i]*PD_012[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_122[i]=2*aPin1*PD_212[i]+PD_010[i]*PD_112[i]+PD_012[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_222[i]=3*aPin1+PD_010[i]*PD_212[i]+PD_112[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_322[i]=PD_010[i]+PD_212[i];
+			}
+	double P_022000000=PD_022[0];
+	double P_122000000=PD_122[0];
+	double P_222000000=PD_222[0];
+	double P_322000000=PD_322[0];
+	double P_021001000=PD_021[0]*PD_001[1];
+	double P_021101000=PD_021[0];
+	double P_121001000=PD_121[0]*PD_001[1];
+	double P_121101000=PD_121[0];
+	double P_221001000=PD_221[0]*PD_001[1];
+	double P_221101000=PD_221[0];
+	double P_321001000=PD_001[1];
+	double P_020002000=PD_020[0]*PD_002[1];
+	double P_020102000=PD_020[0]*PD_102[1];
+	double P_020202000=PD_020[0];
+	double P_120002000=PD_120[0]*PD_002[1];
+	double P_120102000=PD_120[0]*PD_102[1];
+	double P_120202000=PD_120[0];
+	double P_220002000=PD_002[1];
+	double P_220102000=PD_102[1];
+	double P_021000001=PD_021[0]*PD_001[2];
+	double P_021000101=PD_021[0];
+	double P_121000001=PD_121[0]*PD_001[2];
+	double P_121000101=PD_121[0];
+	double P_221000001=PD_221[0]*PD_001[2];
+	double P_221000101=PD_221[0];
+	double P_321000001=PD_001[2];
+	double P_020001001=PD_020[0]*PD_001[1]*PD_001[2];
+	double P_020001101=PD_020[0]*PD_001[1];
+	double P_020101001=PD_020[0]*PD_001[2];
+	double P_020101101=PD_020[0];
+	double P_120001001=PD_120[0]*PD_001[1]*PD_001[2];
+	double P_120001101=PD_120[0]*PD_001[1];
+	double P_120101001=PD_120[0]*PD_001[2];
+	double P_120101101=PD_120[0];
+	double P_220001001=PD_001[1]*PD_001[2];
+	double P_220001101=PD_001[1];
+	double P_220101001=PD_001[2];
+	double P_020000002=PD_020[0]*PD_002[2];
+	double P_020000102=PD_020[0]*PD_102[2];
+	double P_020000202=PD_020[0];
+	double P_120000002=PD_120[0]*PD_002[2];
+	double P_120000102=PD_120[0]*PD_102[2];
+	double P_120000202=PD_120[0];
+	double P_220000002=PD_002[2];
+	double P_220000102=PD_102[2];
+	double P_012010000=PD_012[0]*PD_010[1];
+	double P_012110000=PD_012[0];
+	double P_112010000=PD_112[0]*PD_010[1];
+	double P_112110000=PD_112[0];
+	double P_212010000=PD_212[0]*PD_010[1];
+	double P_212110000=PD_212[0];
+	double P_312010000=PD_010[1];
+	double P_011011000=PD_011[0]*PD_011[1];
+	double P_011111000=PD_011[0]*PD_111[1];
+	double P_011211000=PD_011[0];
+	double P_111011000=PD_111[0]*PD_011[1];
+	double P_111111000=PD_111[0]*PD_111[1];
+	double P_111211000=PD_111[0];
+	double P_211011000=PD_011[1];
+	double P_211111000=PD_111[1];
+	double P_010012000=PD_010[0]*PD_012[1];
+	double P_010112000=PD_010[0]*PD_112[1];
+	double P_010212000=PD_010[0]*PD_212[1];
+	double P_010312000=PD_010[0];
+	double P_110012000=PD_012[1];
+	double P_110112000=PD_112[1];
+	double P_110212000=PD_212[1];
+	double P_011010001=PD_011[0]*PD_010[1]*PD_001[2];
+	double P_011010101=PD_011[0]*PD_010[1];
+	double P_011110001=PD_011[0]*PD_001[2];
+	double P_011110101=PD_011[0];
+	double P_111010001=PD_111[0]*PD_010[1]*PD_001[2];
+	double P_111010101=PD_111[0]*PD_010[1];
+	double P_111110001=PD_111[0]*PD_001[2];
+	double P_111110101=PD_111[0];
+	double P_211010001=PD_010[1]*PD_001[2];
+	double P_211010101=PD_010[1];
+	double P_211110001=PD_001[2];
+	double P_010011001=PD_010[0]*PD_011[1]*PD_001[2];
+	double P_010011101=PD_010[0]*PD_011[1];
+	double P_010111001=PD_010[0]*PD_111[1]*PD_001[2];
+	double P_010111101=PD_010[0]*PD_111[1];
+	double P_010211001=PD_010[0]*PD_001[2];
+	double P_010211101=PD_010[0];
+	double P_110011001=PD_011[1]*PD_001[2];
+	double P_110011101=PD_011[1];
+	double P_110111001=PD_111[1]*PD_001[2];
+	double P_110111101=PD_111[1];
+	double P_110211001=PD_001[2];
+	double P_010010002=PD_010[0]*PD_010[1]*PD_002[2];
+	double P_010010102=PD_010[0]*PD_010[1]*PD_102[2];
+	double P_010010202=PD_010[0]*PD_010[1];
+	double P_010110002=PD_010[0]*PD_002[2];
+	double P_010110102=PD_010[0]*PD_102[2];
+	double P_010110202=PD_010[0];
+	double P_110010002=PD_010[1]*PD_002[2];
+	double P_110010102=PD_010[1]*PD_102[2];
+	double P_110010202=PD_010[1];
+	double P_110110002=PD_002[2];
+	double P_110110102=PD_102[2];
+	double P_002020000=PD_002[0]*PD_020[1];
+	double P_002120000=PD_002[0]*PD_120[1];
+	double P_002220000=PD_002[0];
+	double P_102020000=PD_102[0]*PD_020[1];
+	double P_102120000=PD_102[0]*PD_120[1];
+	double P_102220000=PD_102[0];
+	double P_202020000=PD_020[1];
+	double P_202120000=PD_120[1];
+	double P_001021000=PD_001[0]*PD_021[1];
+	double P_001121000=PD_001[0]*PD_121[1];
+	double P_001221000=PD_001[0]*PD_221[1];
+	double P_001321000=PD_001[0];
+	double P_101021000=PD_021[1];
+	double P_101121000=PD_121[1];
+	double P_101221000=PD_221[1];
+	double P_000022000=PD_022[1];
+	double P_000122000=PD_122[1];
+	double P_000222000=PD_222[1];
+	double P_000322000=PD_322[1];
+	double P_001020001=PD_001[0]*PD_020[1]*PD_001[2];
+	double P_001020101=PD_001[0]*PD_020[1];
+	double P_001120001=PD_001[0]*PD_120[1]*PD_001[2];
+	double P_001120101=PD_001[0]*PD_120[1];
+	double P_001220001=PD_001[0]*PD_001[2];
+	double P_001220101=PD_001[0];
+	double P_101020001=PD_020[1]*PD_001[2];
+	double P_101020101=PD_020[1];
+	double P_101120001=PD_120[1]*PD_001[2];
+	double P_101120101=PD_120[1];
+	double P_101220001=PD_001[2];
+	double P_000021001=PD_021[1]*PD_001[2];
+	double P_000021101=PD_021[1];
+	double P_000121001=PD_121[1]*PD_001[2];
+	double P_000121101=PD_121[1];
+	double P_000221001=PD_221[1]*PD_001[2];
+	double P_000221101=PD_221[1];
+	double P_000321001=PD_001[2];
+	double P_000020002=PD_020[1]*PD_002[2];
+	double P_000020102=PD_020[1]*PD_102[2];
+	double P_000020202=PD_020[1];
+	double P_000120002=PD_120[1]*PD_002[2];
+	double P_000120102=PD_120[1]*PD_102[2];
+	double P_000120202=PD_120[1];
+	double P_000220002=PD_002[2];
+	double P_000220102=PD_102[2];
+	double P_012000010=PD_012[0]*PD_010[2];
+	double P_012000110=PD_012[0];
+	double P_112000010=PD_112[0]*PD_010[2];
+	double P_112000110=PD_112[0];
+	double P_212000010=PD_212[0]*PD_010[2];
+	double P_212000110=PD_212[0];
+	double P_312000010=PD_010[2];
+	double P_011001010=PD_011[0]*PD_001[1]*PD_010[2];
+	double P_011001110=PD_011[0]*PD_001[1];
+	double P_011101010=PD_011[0]*PD_010[2];
+	double P_011101110=PD_011[0];
+	double P_111001010=PD_111[0]*PD_001[1]*PD_010[2];
+	double P_111001110=PD_111[0]*PD_001[1];
+	double P_111101010=PD_111[0]*PD_010[2];
+	double P_111101110=PD_111[0];
+	double P_211001010=PD_001[1]*PD_010[2];
+	double P_211001110=PD_001[1];
+	double P_211101010=PD_010[2];
+	double P_010002010=PD_010[0]*PD_002[1]*PD_010[2];
+	double P_010002110=PD_010[0]*PD_002[1];
+	double P_010102010=PD_010[0]*PD_102[1]*PD_010[2];
+	double P_010102110=PD_010[0]*PD_102[1];
+	double P_010202010=PD_010[0]*PD_010[2];
+	double P_010202110=PD_010[0];
+	double P_110002010=PD_002[1]*PD_010[2];
+	double P_110002110=PD_002[1];
+	double P_110102010=PD_102[1]*PD_010[2];
+	double P_110102110=PD_102[1];
+	double P_110202010=PD_010[2];
+	double P_011000011=PD_011[0]*PD_011[2];
+	double P_011000111=PD_011[0]*PD_111[2];
+	double P_011000211=PD_011[0];
+	double P_111000011=PD_111[0]*PD_011[2];
+	double P_111000111=PD_111[0]*PD_111[2];
+	double P_111000211=PD_111[0];
+	double P_211000011=PD_011[2];
+	double P_211000111=PD_111[2];
+	double P_010001011=PD_010[0]*PD_001[1]*PD_011[2];
+	double P_010001111=PD_010[0]*PD_001[1]*PD_111[2];
+	double P_010001211=PD_010[0]*PD_001[1];
+	double P_010101011=PD_010[0]*PD_011[2];
+	double P_010101111=PD_010[0]*PD_111[2];
+	double P_010101211=PD_010[0];
+	double P_110001011=PD_001[1]*PD_011[2];
+	double P_110001111=PD_001[1]*PD_111[2];
+	double P_110001211=PD_001[1];
+	double P_110101011=PD_011[2];
+	double P_110101111=PD_111[2];
+	double P_010000012=PD_010[0]*PD_012[2];
+	double P_010000112=PD_010[0]*PD_112[2];
+	double P_010000212=PD_010[0]*PD_212[2];
+	double P_010000312=PD_010[0];
+	double P_110000012=PD_012[2];
+	double P_110000112=PD_112[2];
+	double P_110000212=PD_212[2];
+	double P_002010010=PD_002[0]*PD_010[1]*PD_010[2];
+	double P_002010110=PD_002[0]*PD_010[1];
+	double P_002110010=PD_002[0]*PD_010[2];
+	double P_002110110=PD_002[0];
+	double P_102010010=PD_102[0]*PD_010[1]*PD_010[2];
+	double P_102010110=PD_102[0]*PD_010[1];
+	double P_102110010=PD_102[0]*PD_010[2];
+	double P_102110110=PD_102[0];
+	double P_202010010=PD_010[1]*PD_010[2];
+	double P_202010110=PD_010[1];
+	double P_202110010=PD_010[2];
+	double P_001011010=PD_001[0]*PD_011[1]*PD_010[2];
+	double P_001011110=PD_001[0]*PD_011[1];
+	double P_001111010=PD_001[0]*PD_111[1]*PD_010[2];
+	double P_001111110=PD_001[0]*PD_111[1];
+	double P_001211010=PD_001[0]*PD_010[2];
+	double P_001211110=PD_001[0];
+	double P_101011010=PD_011[1]*PD_010[2];
+	double P_101011110=PD_011[1];
+	double P_101111010=PD_111[1]*PD_010[2];
+	double P_101111110=PD_111[1];
+	double P_101211010=PD_010[2];
+	double P_000012010=PD_012[1]*PD_010[2];
+	double P_000012110=PD_012[1];
+	double P_000112010=PD_112[1]*PD_010[2];
+	double P_000112110=PD_112[1];
+	double P_000212010=PD_212[1]*PD_010[2];
+	double P_000212110=PD_212[1];
+	double P_000312010=PD_010[2];
+	double P_001010011=PD_001[0]*PD_010[1]*PD_011[2];
+	double P_001010111=PD_001[0]*PD_010[1]*PD_111[2];
+	double P_001010211=PD_001[0]*PD_010[1];
+	double P_001110011=PD_001[0]*PD_011[2];
+	double P_001110111=PD_001[0]*PD_111[2];
+	double P_001110211=PD_001[0];
+	double P_101010011=PD_010[1]*PD_011[2];
+	double P_101010111=PD_010[1]*PD_111[2];
+	double P_101010211=PD_010[1];
+	double P_101110011=PD_011[2];
+	double P_101110111=PD_111[2];
+	double P_000011011=PD_011[1]*PD_011[2];
+	double P_000011111=PD_011[1]*PD_111[2];
+	double P_000011211=PD_011[1];
+	double P_000111011=PD_111[1]*PD_011[2];
+	double P_000111111=PD_111[1]*PD_111[2];
+	double P_000111211=PD_111[1];
+	double P_000211011=PD_011[2];
+	double P_000211111=PD_111[2];
+	double P_000010012=PD_010[1]*PD_012[2];
+	double P_000010112=PD_010[1]*PD_112[2];
+	double P_000010212=PD_010[1]*PD_212[2];
+	double P_000010312=PD_010[1];
+	double P_000110012=PD_012[2];
+	double P_000110112=PD_112[2];
+	double P_000110212=PD_212[2];
+	double P_002000020=PD_002[0]*PD_020[2];
+	double P_002000120=PD_002[0]*PD_120[2];
+	double P_002000220=PD_002[0];
+	double P_102000020=PD_102[0]*PD_020[2];
+	double P_102000120=PD_102[0]*PD_120[2];
+	double P_102000220=PD_102[0];
+	double P_202000020=PD_020[2];
+	double P_202000120=PD_120[2];
+	double P_001001020=PD_001[0]*PD_001[1]*PD_020[2];
+	double P_001001120=PD_001[0]*PD_001[1]*PD_120[2];
+	double P_001001220=PD_001[0]*PD_001[1];
+	double P_001101020=PD_001[0]*PD_020[2];
+	double P_001101120=PD_001[0]*PD_120[2];
+	double P_001101220=PD_001[0];
+	double P_101001020=PD_001[1]*PD_020[2];
+	double P_101001120=PD_001[1]*PD_120[2];
+	double P_101001220=PD_001[1];
+	double P_101101020=PD_020[2];
+	double P_101101120=PD_120[2];
+	double P_000002020=PD_002[1]*PD_020[2];
+	double P_000002120=PD_002[1]*PD_120[2];
+	double P_000002220=PD_002[1];
+	double P_000102020=PD_102[1]*PD_020[2];
+	double P_000102120=PD_102[1]*PD_120[2];
+	double P_000102220=PD_102[1];
+	double P_000202020=PD_020[2];
+	double P_000202120=PD_120[2];
+	double P_001000021=PD_001[0]*PD_021[2];
+	double P_001000121=PD_001[0]*PD_121[2];
+	double P_001000221=PD_001[0]*PD_221[2];
+	double P_001000321=PD_001[0];
+	double P_101000021=PD_021[2];
+	double P_101000121=PD_121[2];
+	double P_101000221=PD_221[2];
+	double P_000001021=PD_001[1]*PD_021[2];
+	double P_000001121=PD_001[1]*PD_121[2];
+	double P_000001221=PD_001[1]*PD_221[2];
+	double P_000001321=PD_001[1];
+	double P_000101021=PD_021[2];
+	double P_000101121=PD_121[2];
+	double P_000101221=PD_221[2];
+	double P_000000022=PD_022[2];
+	double P_000000122=PD_122[2];
+	double P_000000222=PD_222[2];
+	double P_000000322=PD_322[2];
+				double PR_022000000000=P_022000000*R_000[0]+-1*P_122000000*R_100[0]+P_222000000*R_200[0]+-1*P_322000000*R_300[0]+R_400[0];
+				double PR_021001000000=P_021001000*R_000[0]+-1*P_021101000*R_010[0]+-1*P_121001000*R_100[0]+P_121101000*R_110[0]+P_221001000*R_200[0]+-1*P_221101000*R_210[0]+-1*P_321001000*R_300[0]+R_310[0];
+				double PR_020002000000=P_020002000*R_000[0]+-1*P_020102000*R_010[0]+P_020202000*R_020[0]+-1*P_120002000*R_100[0]+P_120102000*R_110[0]+-1*P_120202000*R_120[0]+P_220002000*R_200[0]+-1*P_220102000*R_210[0]+R_220[0];
+				double PR_021000001000=P_021000001*R_000[0]+-1*P_021000101*R_001[0]+-1*P_121000001*R_100[0]+P_121000101*R_101[0]+P_221000001*R_200[0]+-1*P_221000101*R_201[0]+-1*P_321000001*R_300[0]+R_301[0];
+				double PR_020001001000=P_020001001*R_000[0]+-1*P_020001101*R_001[0]+-1*P_020101001*R_010[0]+P_020101101*R_011[0]+-1*P_120001001*R_100[0]+P_120001101*R_101[0]+P_120101001*R_110[0]+-1*P_120101101*R_111[0]+P_220001001*R_200[0]+-1*P_220001101*R_201[0]+-1*P_220101001*R_210[0]+R_211[0];
+				double PR_020000002000=P_020000002*R_000[0]+-1*P_020000102*R_001[0]+P_020000202*R_002[0]+-1*P_120000002*R_100[0]+P_120000102*R_101[0]+-1*P_120000202*R_102[0]+P_220000002*R_200[0]+-1*P_220000102*R_201[0]+R_202[0];
+				double PR_012010000000=P_012010000*R_000[0]+-1*P_012110000*R_010[0]+-1*P_112010000*R_100[0]+P_112110000*R_110[0]+P_212010000*R_200[0]+-1*P_212110000*R_210[0]+-1*P_312010000*R_300[0]+R_310[0];
+				double PR_011011000000=P_011011000*R_000[0]+-1*P_011111000*R_010[0]+P_011211000*R_020[0]+-1*P_111011000*R_100[0]+P_111111000*R_110[0]+-1*P_111211000*R_120[0]+P_211011000*R_200[0]+-1*P_211111000*R_210[0]+R_220[0];
+				double PR_010012000000=P_010012000*R_000[0]+-1*P_010112000*R_010[0]+P_010212000*R_020[0]+-1*P_010312000*R_030[0]+-1*P_110012000*R_100[0]+P_110112000*R_110[0]+-1*P_110212000*R_120[0]+R_130[0];
+				double PR_011010001000=P_011010001*R_000[0]+-1*P_011010101*R_001[0]+-1*P_011110001*R_010[0]+P_011110101*R_011[0]+-1*P_111010001*R_100[0]+P_111010101*R_101[0]+P_111110001*R_110[0]+-1*P_111110101*R_111[0]+P_211010001*R_200[0]+-1*P_211010101*R_201[0]+-1*P_211110001*R_210[0]+R_211[0];
+				double PR_010011001000=P_010011001*R_000[0]+-1*P_010011101*R_001[0]+-1*P_010111001*R_010[0]+P_010111101*R_011[0]+P_010211001*R_020[0]+-1*P_010211101*R_021[0]+-1*P_110011001*R_100[0]+P_110011101*R_101[0]+P_110111001*R_110[0]+-1*P_110111101*R_111[0]+-1*P_110211001*R_120[0]+R_121[0];
+				double PR_010010002000=P_010010002*R_000[0]+-1*P_010010102*R_001[0]+P_010010202*R_002[0]+-1*P_010110002*R_010[0]+P_010110102*R_011[0]+-1*P_010110202*R_012[0]+-1*P_110010002*R_100[0]+P_110010102*R_101[0]+-1*P_110010202*R_102[0]+P_110110002*R_110[0]+-1*P_110110102*R_111[0]+R_112[0];
+				double PR_002020000000=P_002020000*R_000[0]+-1*P_002120000*R_010[0]+P_002220000*R_020[0]+-1*P_102020000*R_100[0]+P_102120000*R_110[0]+-1*P_102220000*R_120[0]+P_202020000*R_200[0]+-1*P_202120000*R_210[0]+R_220[0];
+				double PR_001021000000=P_001021000*R_000[0]+-1*P_001121000*R_010[0]+P_001221000*R_020[0]+-1*P_001321000*R_030[0]+-1*P_101021000*R_100[0]+P_101121000*R_110[0]+-1*P_101221000*R_120[0]+R_130[0];
+				double PR_000022000000=P_000022000*R_000[0]+-1*P_000122000*R_010[0]+P_000222000*R_020[0]+-1*P_000322000*R_030[0]+R_040[0];
+				double PR_001020001000=P_001020001*R_000[0]+-1*P_001020101*R_001[0]+-1*P_001120001*R_010[0]+P_001120101*R_011[0]+P_001220001*R_020[0]+-1*P_001220101*R_021[0]+-1*P_101020001*R_100[0]+P_101020101*R_101[0]+P_101120001*R_110[0]+-1*P_101120101*R_111[0]+-1*P_101220001*R_120[0]+R_121[0];
+				double PR_000021001000=P_000021001*R_000[0]+-1*P_000021101*R_001[0]+-1*P_000121001*R_010[0]+P_000121101*R_011[0]+P_000221001*R_020[0]+-1*P_000221101*R_021[0]+-1*P_000321001*R_030[0]+R_031[0];
+				double PR_000020002000=P_000020002*R_000[0]+-1*P_000020102*R_001[0]+P_000020202*R_002[0]+-1*P_000120002*R_010[0]+P_000120102*R_011[0]+-1*P_000120202*R_012[0]+P_000220002*R_020[0]+-1*P_000220102*R_021[0]+R_022[0];
+				double PR_012000010000=P_012000010*R_000[0]+-1*P_012000110*R_001[0]+-1*P_112000010*R_100[0]+P_112000110*R_101[0]+P_212000010*R_200[0]+-1*P_212000110*R_201[0]+-1*P_312000010*R_300[0]+R_301[0];
+				double PR_011001010000=P_011001010*R_000[0]+-1*P_011001110*R_001[0]+-1*P_011101010*R_010[0]+P_011101110*R_011[0]+-1*P_111001010*R_100[0]+P_111001110*R_101[0]+P_111101010*R_110[0]+-1*P_111101110*R_111[0]+P_211001010*R_200[0]+-1*P_211001110*R_201[0]+-1*P_211101010*R_210[0]+R_211[0];
+				double PR_010002010000=P_010002010*R_000[0]+-1*P_010002110*R_001[0]+-1*P_010102010*R_010[0]+P_010102110*R_011[0]+P_010202010*R_020[0]+-1*P_010202110*R_021[0]+-1*P_110002010*R_100[0]+P_110002110*R_101[0]+P_110102010*R_110[0]+-1*P_110102110*R_111[0]+-1*P_110202010*R_120[0]+R_121[0];
+				double PR_011000011000=P_011000011*R_000[0]+-1*P_011000111*R_001[0]+P_011000211*R_002[0]+-1*P_111000011*R_100[0]+P_111000111*R_101[0]+-1*P_111000211*R_102[0]+P_211000011*R_200[0]+-1*P_211000111*R_201[0]+R_202[0];
+				double PR_010001011000=P_010001011*R_000[0]+-1*P_010001111*R_001[0]+P_010001211*R_002[0]+-1*P_010101011*R_010[0]+P_010101111*R_011[0]+-1*P_010101211*R_012[0]+-1*P_110001011*R_100[0]+P_110001111*R_101[0]+-1*P_110001211*R_102[0]+P_110101011*R_110[0]+-1*P_110101111*R_111[0]+R_112[0];
+				double PR_010000012000=P_010000012*R_000[0]+-1*P_010000112*R_001[0]+P_010000212*R_002[0]+-1*P_010000312*R_003[0]+-1*P_110000012*R_100[0]+P_110000112*R_101[0]+-1*P_110000212*R_102[0]+R_103[0];
+				double PR_002010010000=P_002010010*R_000[0]+-1*P_002010110*R_001[0]+-1*P_002110010*R_010[0]+P_002110110*R_011[0]+-1*P_102010010*R_100[0]+P_102010110*R_101[0]+P_102110010*R_110[0]+-1*P_102110110*R_111[0]+P_202010010*R_200[0]+-1*P_202010110*R_201[0]+-1*P_202110010*R_210[0]+R_211[0];
+				double PR_001011010000=P_001011010*R_000[0]+-1*P_001011110*R_001[0]+-1*P_001111010*R_010[0]+P_001111110*R_011[0]+P_001211010*R_020[0]+-1*P_001211110*R_021[0]+-1*P_101011010*R_100[0]+P_101011110*R_101[0]+P_101111010*R_110[0]+-1*P_101111110*R_111[0]+-1*P_101211010*R_120[0]+R_121[0];
+				double PR_000012010000=P_000012010*R_000[0]+-1*P_000012110*R_001[0]+-1*P_000112010*R_010[0]+P_000112110*R_011[0]+P_000212010*R_020[0]+-1*P_000212110*R_021[0]+-1*P_000312010*R_030[0]+R_031[0];
+				double PR_001010011000=P_001010011*R_000[0]+-1*P_001010111*R_001[0]+P_001010211*R_002[0]+-1*P_001110011*R_010[0]+P_001110111*R_011[0]+-1*P_001110211*R_012[0]+-1*P_101010011*R_100[0]+P_101010111*R_101[0]+-1*P_101010211*R_102[0]+P_101110011*R_110[0]+-1*P_101110111*R_111[0]+R_112[0];
+				double PR_000011011000=P_000011011*R_000[0]+-1*P_000011111*R_001[0]+P_000011211*R_002[0]+-1*P_000111011*R_010[0]+P_000111111*R_011[0]+-1*P_000111211*R_012[0]+P_000211011*R_020[0]+-1*P_000211111*R_021[0]+R_022[0];
+				double PR_000010012000=P_000010012*R_000[0]+-1*P_000010112*R_001[0]+P_000010212*R_002[0]+-1*P_000010312*R_003[0]+-1*P_000110012*R_010[0]+P_000110112*R_011[0]+-1*P_000110212*R_012[0]+R_013[0];
+				double PR_002000020000=P_002000020*R_000[0]+-1*P_002000120*R_001[0]+P_002000220*R_002[0]+-1*P_102000020*R_100[0]+P_102000120*R_101[0]+-1*P_102000220*R_102[0]+P_202000020*R_200[0]+-1*P_202000120*R_201[0]+R_202[0];
+				double PR_001001020000=P_001001020*R_000[0]+-1*P_001001120*R_001[0]+P_001001220*R_002[0]+-1*P_001101020*R_010[0]+P_001101120*R_011[0]+-1*P_001101220*R_012[0]+-1*P_101001020*R_100[0]+P_101001120*R_101[0]+-1*P_101001220*R_102[0]+P_101101020*R_110[0]+-1*P_101101120*R_111[0]+R_112[0];
+				double PR_000002020000=P_000002020*R_000[0]+-1*P_000002120*R_001[0]+P_000002220*R_002[0]+-1*P_000102020*R_010[0]+P_000102120*R_011[0]+-1*P_000102220*R_012[0]+P_000202020*R_020[0]+-1*P_000202120*R_021[0]+R_022[0];
+				double PR_001000021000=P_001000021*R_000[0]+-1*P_001000121*R_001[0]+P_001000221*R_002[0]+-1*P_001000321*R_003[0]+-1*P_101000021*R_100[0]+P_101000121*R_101[0]+-1*P_101000221*R_102[0]+R_103[0];
+				double PR_000001021000=P_000001021*R_000[0]+-1*P_000001121*R_001[0]+P_000001221*R_002[0]+-1*P_000001321*R_003[0]+-1*P_000101021*R_010[0]+P_000101121*R_011[0]+-1*P_000101221*R_012[0]+R_013[0];
+				double PR_000000022000=P_000000022*R_000[0]+-1*P_000000122*R_001[0]+P_000000222*R_002[0]+-1*P_000000322*R_003[0]+R_004[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_022000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_021001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020002000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(PR_021000001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(PR_020001001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(PR_020000002000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_012010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_011011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010012000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(PR_011010001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(PR_010011001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(PR_010010002000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_002020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_001021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000022000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(PR_001020001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(PR_000021001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(PR_000020002000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_012000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_011001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010002010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(PR_011000011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(PR_010001011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(PR_010000012000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_002010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_001011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000012010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(PR_001010011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(PR_000011011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(PR_000010012000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_002000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_001001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000002020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(PR_001000021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(PR_000001021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(PR_000000022000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ddss_D(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	R_000[4]*=aPin4;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<4;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_200[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_020[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_002[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+				double QR_000000000003=R_003[0];
+				double QR_000000000012=R_012[0];
+				double QR_000000000021=R_021[0];
+				double QR_000000000030=R_030[0];
+				double QR_000000000102=R_102[0];
+				double QR_000000000111=R_111[0];
+				double QR_000000000120=R_120[0];
+				double QR_000000000201=R_201[0];
+				double QR_000000000210=R_210[0];
+				double QR_000000000300=R_300[0];
+				double QR_000000000004=R_004[0];
+				double QR_000000000013=R_013[0];
+				double QR_000000000022=R_022[0];
+				double QR_000000000031=R_031[0];
+				double QR_000000000040=R_040[0];
+				double QR_000000000103=R_103[0];
+				double QR_000000000112=R_112[0];
+				double QR_000000000121=R_121[0];
+				double QR_000000000130=R_130[0];
+				double QR_000000000202=R_202[0];
+				double QR_000000000211=R_211[0];
+				double QR_000000000220=R_220[0];
+				double QR_000000000301=R_301[0];
+				double QR_000000000310=R_310[0];
+				double QR_000000000400=R_400[0];
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		double PD_022[3];
+		double PD_122[3];
+		double PD_222[3];
+		double PD_322[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=PD_001[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=PD_010[i]+PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=aPin1*PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=2*aPin1+PD_001[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=PD_001[i]+PD_111[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=PD_010[i]+PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=aPin1*PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=2*aPin1+PD_010[i]*PD_111[i]+PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=PD_010[i]+PD_111[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_022[i]=aPin1*PD_112[i]+PD_010[i]*PD_012[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_122[i]=2*aPin1*PD_212[i]+PD_010[i]*PD_112[i]+PD_012[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_222[i]=3*aPin1+PD_010[i]*PD_212[i]+PD_112[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_322[i]=PD_010[i]+PD_212[i];
+			}
+	double P_022000000=PD_022[0];
+	double P_122000000=PD_122[0];
+	double P_222000000=PD_222[0];
+	double P_322000000=PD_322[0];
+	double P_021001000=PD_021[0]*PD_001[1];
+	double P_021101000=PD_021[0];
+	double P_121001000=PD_121[0]*PD_001[1];
+	double P_121101000=PD_121[0];
+	double P_221001000=PD_221[0]*PD_001[1];
+	double P_221101000=PD_221[0];
+	double P_321001000=PD_001[1];
+	double P_020002000=PD_020[0]*PD_002[1];
+	double P_020102000=PD_020[0]*PD_102[1];
+	double P_020202000=PD_020[0];
+	double P_120002000=PD_120[0]*PD_002[1];
+	double P_120102000=PD_120[0]*PD_102[1];
+	double P_120202000=PD_120[0];
+	double P_220002000=PD_002[1];
+	double P_220102000=PD_102[1];
+	double P_021000001=PD_021[0]*PD_001[2];
+	double P_021000101=PD_021[0];
+	double P_121000001=PD_121[0]*PD_001[2];
+	double P_121000101=PD_121[0];
+	double P_221000001=PD_221[0]*PD_001[2];
+	double P_221000101=PD_221[0];
+	double P_321000001=PD_001[2];
+	double P_020001001=PD_020[0]*PD_001[1]*PD_001[2];
+	double P_020001101=PD_020[0]*PD_001[1];
+	double P_020101001=PD_020[0]*PD_001[2];
+	double P_020101101=PD_020[0];
+	double P_120001001=PD_120[0]*PD_001[1]*PD_001[2];
+	double P_120001101=PD_120[0]*PD_001[1];
+	double P_120101001=PD_120[0]*PD_001[2];
+	double P_120101101=PD_120[0];
+	double P_220001001=PD_001[1]*PD_001[2];
+	double P_220001101=PD_001[1];
+	double P_220101001=PD_001[2];
+	double P_020000002=PD_020[0]*PD_002[2];
+	double P_020000102=PD_020[0]*PD_102[2];
+	double P_020000202=PD_020[0];
+	double P_120000002=PD_120[0]*PD_002[2];
+	double P_120000102=PD_120[0]*PD_102[2];
+	double P_120000202=PD_120[0];
+	double P_220000002=PD_002[2];
+	double P_220000102=PD_102[2];
+	double P_012010000=PD_012[0]*PD_010[1];
+	double P_012110000=PD_012[0];
+	double P_112010000=PD_112[0]*PD_010[1];
+	double P_112110000=PD_112[0];
+	double P_212010000=PD_212[0]*PD_010[1];
+	double P_212110000=PD_212[0];
+	double P_312010000=PD_010[1];
+	double P_011011000=PD_011[0]*PD_011[1];
+	double P_011111000=PD_011[0]*PD_111[1];
+	double P_011211000=PD_011[0];
+	double P_111011000=PD_111[0]*PD_011[1];
+	double P_111111000=PD_111[0]*PD_111[1];
+	double P_111211000=PD_111[0];
+	double P_211011000=PD_011[1];
+	double P_211111000=PD_111[1];
+	double P_010012000=PD_010[0]*PD_012[1];
+	double P_010112000=PD_010[0]*PD_112[1];
+	double P_010212000=PD_010[0]*PD_212[1];
+	double P_010312000=PD_010[0];
+	double P_110012000=PD_012[1];
+	double P_110112000=PD_112[1];
+	double P_110212000=PD_212[1];
+	double P_011010001=PD_011[0]*PD_010[1]*PD_001[2];
+	double P_011010101=PD_011[0]*PD_010[1];
+	double P_011110001=PD_011[0]*PD_001[2];
+	double P_011110101=PD_011[0];
+	double P_111010001=PD_111[0]*PD_010[1]*PD_001[2];
+	double P_111010101=PD_111[0]*PD_010[1];
+	double P_111110001=PD_111[0]*PD_001[2];
+	double P_111110101=PD_111[0];
+	double P_211010001=PD_010[1]*PD_001[2];
+	double P_211010101=PD_010[1];
+	double P_211110001=PD_001[2];
+	double P_010011001=PD_010[0]*PD_011[1]*PD_001[2];
+	double P_010011101=PD_010[0]*PD_011[1];
+	double P_010111001=PD_010[0]*PD_111[1]*PD_001[2];
+	double P_010111101=PD_010[0]*PD_111[1];
+	double P_010211001=PD_010[0]*PD_001[2];
+	double P_010211101=PD_010[0];
+	double P_110011001=PD_011[1]*PD_001[2];
+	double P_110011101=PD_011[1];
+	double P_110111001=PD_111[1]*PD_001[2];
+	double P_110111101=PD_111[1];
+	double P_110211001=PD_001[2];
+	double P_010010002=PD_010[0]*PD_010[1]*PD_002[2];
+	double P_010010102=PD_010[0]*PD_010[1]*PD_102[2];
+	double P_010010202=PD_010[0]*PD_010[1];
+	double P_010110002=PD_010[0]*PD_002[2];
+	double P_010110102=PD_010[0]*PD_102[2];
+	double P_010110202=PD_010[0];
+	double P_110010002=PD_010[1]*PD_002[2];
+	double P_110010102=PD_010[1]*PD_102[2];
+	double P_110010202=PD_010[1];
+	double P_110110002=PD_002[2];
+	double P_110110102=PD_102[2];
+	double P_002020000=PD_002[0]*PD_020[1];
+	double P_002120000=PD_002[0]*PD_120[1];
+	double P_002220000=PD_002[0];
+	double P_102020000=PD_102[0]*PD_020[1];
+	double P_102120000=PD_102[0]*PD_120[1];
+	double P_102220000=PD_102[0];
+	double P_202020000=PD_020[1];
+	double P_202120000=PD_120[1];
+	double P_001021000=PD_001[0]*PD_021[1];
+	double P_001121000=PD_001[0]*PD_121[1];
+	double P_001221000=PD_001[0]*PD_221[1];
+	double P_001321000=PD_001[0];
+	double P_101021000=PD_021[1];
+	double P_101121000=PD_121[1];
+	double P_101221000=PD_221[1];
+	double P_000022000=PD_022[1];
+	double P_000122000=PD_122[1];
+	double P_000222000=PD_222[1];
+	double P_000322000=PD_322[1];
+	double P_001020001=PD_001[0]*PD_020[1]*PD_001[2];
+	double P_001020101=PD_001[0]*PD_020[1];
+	double P_001120001=PD_001[0]*PD_120[1]*PD_001[2];
+	double P_001120101=PD_001[0]*PD_120[1];
+	double P_001220001=PD_001[0]*PD_001[2];
+	double P_001220101=PD_001[0];
+	double P_101020001=PD_020[1]*PD_001[2];
+	double P_101020101=PD_020[1];
+	double P_101120001=PD_120[1]*PD_001[2];
+	double P_101120101=PD_120[1];
+	double P_101220001=PD_001[2];
+	double P_000021001=PD_021[1]*PD_001[2];
+	double P_000021101=PD_021[1];
+	double P_000121001=PD_121[1]*PD_001[2];
+	double P_000121101=PD_121[1];
+	double P_000221001=PD_221[1]*PD_001[2];
+	double P_000221101=PD_221[1];
+	double P_000321001=PD_001[2];
+	double P_000020002=PD_020[1]*PD_002[2];
+	double P_000020102=PD_020[1]*PD_102[2];
+	double P_000020202=PD_020[1];
+	double P_000120002=PD_120[1]*PD_002[2];
+	double P_000120102=PD_120[1]*PD_102[2];
+	double P_000120202=PD_120[1];
+	double P_000220002=PD_002[2];
+	double P_000220102=PD_102[2];
+	double P_012000010=PD_012[0]*PD_010[2];
+	double P_012000110=PD_012[0];
+	double P_112000010=PD_112[0]*PD_010[2];
+	double P_112000110=PD_112[0];
+	double P_212000010=PD_212[0]*PD_010[2];
+	double P_212000110=PD_212[0];
+	double P_312000010=PD_010[2];
+	double P_011001010=PD_011[0]*PD_001[1]*PD_010[2];
+	double P_011001110=PD_011[0]*PD_001[1];
+	double P_011101010=PD_011[0]*PD_010[2];
+	double P_011101110=PD_011[0];
+	double P_111001010=PD_111[0]*PD_001[1]*PD_010[2];
+	double P_111001110=PD_111[0]*PD_001[1];
+	double P_111101010=PD_111[0]*PD_010[2];
+	double P_111101110=PD_111[0];
+	double P_211001010=PD_001[1]*PD_010[2];
+	double P_211001110=PD_001[1];
+	double P_211101010=PD_010[2];
+	double P_010002010=PD_010[0]*PD_002[1]*PD_010[2];
+	double P_010002110=PD_010[0]*PD_002[1];
+	double P_010102010=PD_010[0]*PD_102[1]*PD_010[2];
+	double P_010102110=PD_010[0]*PD_102[1];
+	double P_010202010=PD_010[0]*PD_010[2];
+	double P_010202110=PD_010[0];
+	double P_110002010=PD_002[1]*PD_010[2];
+	double P_110002110=PD_002[1];
+	double P_110102010=PD_102[1]*PD_010[2];
+	double P_110102110=PD_102[1];
+	double P_110202010=PD_010[2];
+	double P_011000011=PD_011[0]*PD_011[2];
+	double P_011000111=PD_011[0]*PD_111[2];
+	double P_011000211=PD_011[0];
+	double P_111000011=PD_111[0]*PD_011[2];
+	double P_111000111=PD_111[0]*PD_111[2];
+	double P_111000211=PD_111[0];
+	double P_211000011=PD_011[2];
+	double P_211000111=PD_111[2];
+	double P_010001011=PD_010[0]*PD_001[1]*PD_011[2];
+	double P_010001111=PD_010[0]*PD_001[1]*PD_111[2];
+	double P_010001211=PD_010[0]*PD_001[1];
+	double P_010101011=PD_010[0]*PD_011[2];
+	double P_010101111=PD_010[0]*PD_111[2];
+	double P_010101211=PD_010[0];
+	double P_110001011=PD_001[1]*PD_011[2];
+	double P_110001111=PD_001[1]*PD_111[2];
+	double P_110001211=PD_001[1];
+	double P_110101011=PD_011[2];
+	double P_110101111=PD_111[2];
+	double P_010000012=PD_010[0]*PD_012[2];
+	double P_010000112=PD_010[0]*PD_112[2];
+	double P_010000212=PD_010[0]*PD_212[2];
+	double P_010000312=PD_010[0];
+	double P_110000012=PD_012[2];
+	double P_110000112=PD_112[2];
+	double P_110000212=PD_212[2];
+	double P_002010010=PD_002[0]*PD_010[1]*PD_010[2];
+	double P_002010110=PD_002[0]*PD_010[1];
+	double P_002110010=PD_002[0]*PD_010[2];
+	double P_002110110=PD_002[0];
+	double P_102010010=PD_102[0]*PD_010[1]*PD_010[2];
+	double P_102010110=PD_102[0]*PD_010[1];
+	double P_102110010=PD_102[0]*PD_010[2];
+	double P_102110110=PD_102[0];
+	double P_202010010=PD_010[1]*PD_010[2];
+	double P_202010110=PD_010[1];
+	double P_202110010=PD_010[2];
+	double P_001011010=PD_001[0]*PD_011[1]*PD_010[2];
+	double P_001011110=PD_001[0]*PD_011[1];
+	double P_001111010=PD_001[0]*PD_111[1]*PD_010[2];
+	double P_001111110=PD_001[0]*PD_111[1];
+	double P_001211010=PD_001[0]*PD_010[2];
+	double P_001211110=PD_001[0];
+	double P_101011010=PD_011[1]*PD_010[2];
+	double P_101011110=PD_011[1];
+	double P_101111010=PD_111[1]*PD_010[2];
+	double P_101111110=PD_111[1];
+	double P_101211010=PD_010[2];
+	double P_000012010=PD_012[1]*PD_010[2];
+	double P_000012110=PD_012[1];
+	double P_000112010=PD_112[1]*PD_010[2];
+	double P_000112110=PD_112[1];
+	double P_000212010=PD_212[1]*PD_010[2];
+	double P_000212110=PD_212[1];
+	double P_000312010=PD_010[2];
+	double P_001010011=PD_001[0]*PD_010[1]*PD_011[2];
+	double P_001010111=PD_001[0]*PD_010[1]*PD_111[2];
+	double P_001010211=PD_001[0]*PD_010[1];
+	double P_001110011=PD_001[0]*PD_011[2];
+	double P_001110111=PD_001[0]*PD_111[2];
+	double P_001110211=PD_001[0];
+	double P_101010011=PD_010[1]*PD_011[2];
+	double P_101010111=PD_010[1]*PD_111[2];
+	double P_101010211=PD_010[1];
+	double P_101110011=PD_011[2];
+	double P_101110111=PD_111[2];
+	double P_000011011=PD_011[1]*PD_011[2];
+	double P_000011111=PD_011[1]*PD_111[2];
+	double P_000011211=PD_011[1];
+	double P_000111011=PD_111[1]*PD_011[2];
+	double P_000111111=PD_111[1]*PD_111[2];
+	double P_000111211=PD_111[1];
+	double P_000211011=PD_011[2];
+	double P_000211111=PD_111[2];
+	double P_000010012=PD_010[1]*PD_012[2];
+	double P_000010112=PD_010[1]*PD_112[2];
+	double P_000010212=PD_010[1]*PD_212[2];
+	double P_000010312=PD_010[1];
+	double P_000110012=PD_012[2];
+	double P_000110112=PD_112[2];
+	double P_000110212=PD_212[2];
+	double P_002000020=PD_002[0]*PD_020[2];
+	double P_002000120=PD_002[0]*PD_120[2];
+	double P_002000220=PD_002[0];
+	double P_102000020=PD_102[0]*PD_020[2];
+	double P_102000120=PD_102[0]*PD_120[2];
+	double P_102000220=PD_102[0];
+	double P_202000020=PD_020[2];
+	double P_202000120=PD_120[2];
+	double P_001001020=PD_001[0]*PD_001[1]*PD_020[2];
+	double P_001001120=PD_001[0]*PD_001[1]*PD_120[2];
+	double P_001001220=PD_001[0]*PD_001[1];
+	double P_001101020=PD_001[0]*PD_020[2];
+	double P_001101120=PD_001[0]*PD_120[2];
+	double P_001101220=PD_001[0];
+	double P_101001020=PD_001[1]*PD_020[2];
+	double P_101001120=PD_001[1]*PD_120[2];
+	double P_101001220=PD_001[1];
+	double P_101101020=PD_020[2];
+	double P_101101120=PD_120[2];
+	double P_000002020=PD_002[1]*PD_020[2];
+	double P_000002120=PD_002[1]*PD_120[2];
+	double P_000002220=PD_002[1];
+	double P_000102020=PD_102[1]*PD_020[2];
+	double P_000102120=PD_102[1]*PD_120[2];
+	double P_000102220=PD_102[1];
+	double P_000202020=PD_020[2];
+	double P_000202120=PD_120[2];
+	double P_001000021=PD_001[0]*PD_021[2];
+	double P_001000121=PD_001[0]*PD_121[2];
+	double P_001000221=PD_001[0]*PD_221[2];
+	double P_001000321=PD_001[0];
+	double P_101000021=PD_021[2];
+	double P_101000121=PD_121[2];
+	double P_101000221=PD_221[2];
+	double P_000001021=PD_001[1]*PD_021[2];
+	double P_000001121=PD_001[1]*PD_121[2];
+	double P_000001221=PD_001[1]*PD_221[2];
+	double P_000001321=PD_001[1];
+	double P_000101021=PD_021[2];
+	double P_000101121=PD_121[2];
+	double P_000101221=PD_221[2];
+	double P_000000022=PD_022[2];
+	double P_000000122=PD_122[2];
+	double P_000000222=PD_222[2];
+	double P_000000322=PD_322[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_022000000*QR_000000000000+P_122000000*QR_000000000100+P_222000000*QR_000000000200+P_322000000*QR_000000000300+QR_000000000400);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_021001000*QR_000000000000+P_021101000*QR_000000000010+P_121001000*QR_000000000100+P_121101000*QR_000000000110+P_221001000*QR_000000000200+P_221101000*QR_000000000210+P_321001000*QR_000000000300+QR_000000000310);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020002000*QR_000000000000+P_020102000*QR_000000000010+P_020202000*QR_000000000020+P_120002000*QR_000000000100+P_120102000*QR_000000000110+P_120202000*QR_000000000120+P_220002000*QR_000000000200+P_220102000*QR_000000000210+QR_000000000220);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(P_021000001*QR_000000000000+P_021000101*QR_000000000001+P_121000001*QR_000000000100+P_121000101*QR_000000000101+P_221000001*QR_000000000200+P_221000101*QR_000000000201+P_321000001*QR_000000000300+QR_000000000301);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(P_020001001*QR_000000000000+P_020001101*QR_000000000001+P_020101001*QR_000000000010+P_020101101*QR_000000000011+P_120001001*QR_000000000100+P_120001101*QR_000000000101+P_120101001*QR_000000000110+P_120101101*QR_000000000111+P_220001001*QR_000000000200+P_220001101*QR_000000000201+P_220101001*QR_000000000210+QR_000000000211);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(P_020000002*QR_000000000000+P_020000102*QR_000000000001+P_020000202*QR_000000000002+P_120000002*QR_000000000100+P_120000102*QR_000000000101+P_120000202*QR_000000000102+P_220000002*QR_000000000200+P_220000102*QR_000000000201+QR_000000000202);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_012010000*QR_000000000000+P_012110000*QR_000000000010+P_112010000*QR_000000000100+P_112110000*QR_000000000110+P_212010000*QR_000000000200+P_212110000*QR_000000000210+P_312010000*QR_000000000300+QR_000000000310);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_011011000*QR_000000000000+P_011111000*QR_000000000010+P_011211000*QR_000000000020+P_111011000*QR_000000000100+P_111111000*QR_000000000110+P_111211000*QR_000000000120+P_211011000*QR_000000000200+P_211111000*QR_000000000210+QR_000000000220);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010012000*QR_000000000000+P_010112000*QR_000000000010+P_010212000*QR_000000000020+P_010312000*QR_000000000030+P_110012000*QR_000000000100+P_110112000*QR_000000000110+P_110212000*QR_000000000120+QR_000000000130);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(P_011010001*QR_000000000000+P_011010101*QR_000000000001+P_011110001*QR_000000000010+P_011110101*QR_000000000011+P_111010001*QR_000000000100+P_111010101*QR_000000000101+P_111110001*QR_000000000110+P_111110101*QR_000000000111+P_211010001*QR_000000000200+P_211010101*QR_000000000201+P_211110001*QR_000000000210+QR_000000000211);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(P_010011001*QR_000000000000+P_010011101*QR_000000000001+P_010111001*QR_000000000010+P_010111101*QR_000000000011+P_010211001*QR_000000000020+P_010211101*QR_000000000021+P_110011001*QR_000000000100+P_110011101*QR_000000000101+P_110111001*QR_000000000110+P_110111101*QR_000000000111+P_110211001*QR_000000000120+QR_000000000121);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(P_010010002*QR_000000000000+P_010010102*QR_000000000001+P_010010202*QR_000000000002+P_010110002*QR_000000000010+P_010110102*QR_000000000011+P_010110202*QR_000000000012+P_110010002*QR_000000000100+P_110010102*QR_000000000101+P_110010202*QR_000000000102+P_110110002*QR_000000000110+P_110110102*QR_000000000111+QR_000000000112);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_002020000*QR_000000000000+P_002120000*QR_000000000010+P_002220000*QR_000000000020+P_102020000*QR_000000000100+P_102120000*QR_000000000110+P_102220000*QR_000000000120+P_202020000*QR_000000000200+P_202120000*QR_000000000210+QR_000000000220);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_001021000*QR_000000000000+P_001121000*QR_000000000010+P_001221000*QR_000000000020+P_001321000*QR_000000000030+P_101021000*QR_000000000100+P_101121000*QR_000000000110+P_101221000*QR_000000000120+QR_000000000130);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000022000*QR_000000000000+P_000122000*QR_000000000010+P_000222000*QR_000000000020+P_000322000*QR_000000000030+QR_000000000040);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(P_001020001*QR_000000000000+P_001020101*QR_000000000001+P_001120001*QR_000000000010+P_001120101*QR_000000000011+P_001220001*QR_000000000020+P_001220101*QR_000000000021+P_101020001*QR_000000000100+P_101020101*QR_000000000101+P_101120001*QR_000000000110+P_101120101*QR_000000000111+P_101220001*QR_000000000120+QR_000000000121);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(P_000021001*QR_000000000000+P_000021101*QR_000000000001+P_000121001*QR_000000000010+P_000121101*QR_000000000011+P_000221001*QR_000000000020+P_000221101*QR_000000000021+P_000321001*QR_000000000030+QR_000000000031);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(P_000020002*QR_000000000000+P_000020102*QR_000000000001+P_000020202*QR_000000000002+P_000120002*QR_000000000010+P_000120102*QR_000000000011+P_000120202*QR_000000000012+P_000220002*QR_000000000020+P_000220102*QR_000000000021+QR_000000000022);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_012000010*QR_000000000000+P_012000110*QR_000000000001+P_112000010*QR_000000000100+P_112000110*QR_000000000101+P_212000010*QR_000000000200+P_212000110*QR_000000000201+P_312000010*QR_000000000300+QR_000000000301);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_011001010*QR_000000000000+P_011001110*QR_000000000001+P_011101010*QR_000000000010+P_011101110*QR_000000000011+P_111001010*QR_000000000100+P_111001110*QR_000000000101+P_111101010*QR_000000000110+P_111101110*QR_000000000111+P_211001010*QR_000000000200+P_211001110*QR_000000000201+P_211101010*QR_000000000210+QR_000000000211);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010002010*QR_000000000000+P_010002110*QR_000000000001+P_010102010*QR_000000000010+P_010102110*QR_000000000011+P_010202010*QR_000000000020+P_010202110*QR_000000000021+P_110002010*QR_000000000100+P_110002110*QR_000000000101+P_110102010*QR_000000000110+P_110102110*QR_000000000111+P_110202010*QR_000000000120+QR_000000000121);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(P_011000011*QR_000000000000+P_011000111*QR_000000000001+P_011000211*QR_000000000002+P_111000011*QR_000000000100+P_111000111*QR_000000000101+P_111000211*QR_000000000102+P_211000011*QR_000000000200+P_211000111*QR_000000000201+QR_000000000202);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(P_010001011*QR_000000000000+P_010001111*QR_000000000001+P_010001211*QR_000000000002+P_010101011*QR_000000000010+P_010101111*QR_000000000011+P_010101211*QR_000000000012+P_110001011*QR_000000000100+P_110001111*QR_000000000101+P_110001211*QR_000000000102+P_110101011*QR_000000000110+P_110101111*QR_000000000111+QR_000000000112);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(P_010000012*QR_000000000000+P_010000112*QR_000000000001+P_010000212*QR_000000000002+P_010000312*QR_000000000003+P_110000012*QR_000000000100+P_110000112*QR_000000000101+P_110000212*QR_000000000102+QR_000000000103);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_002010010*QR_000000000000+P_002010110*QR_000000000001+P_002110010*QR_000000000010+P_002110110*QR_000000000011+P_102010010*QR_000000000100+P_102010110*QR_000000000101+P_102110010*QR_000000000110+P_102110110*QR_000000000111+P_202010010*QR_000000000200+P_202010110*QR_000000000201+P_202110010*QR_000000000210+QR_000000000211);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_001011010*QR_000000000000+P_001011110*QR_000000000001+P_001111010*QR_000000000010+P_001111110*QR_000000000011+P_001211010*QR_000000000020+P_001211110*QR_000000000021+P_101011010*QR_000000000100+P_101011110*QR_000000000101+P_101111010*QR_000000000110+P_101111110*QR_000000000111+P_101211010*QR_000000000120+QR_000000000121);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000012010*QR_000000000000+P_000012110*QR_000000000001+P_000112010*QR_000000000010+P_000112110*QR_000000000011+P_000212010*QR_000000000020+P_000212110*QR_000000000021+P_000312010*QR_000000000030+QR_000000000031);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(P_001010011*QR_000000000000+P_001010111*QR_000000000001+P_001010211*QR_000000000002+P_001110011*QR_000000000010+P_001110111*QR_000000000011+P_001110211*QR_000000000012+P_101010011*QR_000000000100+P_101010111*QR_000000000101+P_101010211*QR_000000000102+P_101110011*QR_000000000110+P_101110111*QR_000000000111+QR_000000000112);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(P_000011011*QR_000000000000+P_000011111*QR_000000000001+P_000011211*QR_000000000002+P_000111011*QR_000000000010+P_000111111*QR_000000000011+P_000111211*QR_000000000012+P_000211011*QR_000000000020+P_000211111*QR_000000000021+QR_000000000022);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(P_000010012*QR_000000000000+P_000010112*QR_000000000001+P_000010212*QR_000000000002+P_000010312*QR_000000000003+P_000110012*QR_000000000010+P_000110112*QR_000000000011+P_000110212*QR_000000000012+QR_000000000013);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_002000020*QR_000000000000+P_002000120*QR_000000000001+P_002000220*QR_000000000002+P_102000020*QR_000000000100+P_102000120*QR_000000000101+P_102000220*QR_000000000102+P_202000020*QR_000000000200+P_202000120*QR_000000000201+QR_000000000202);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_001001020*QR_000000000000+P_001001120*QR_000000000001+P_001001220*QR_000000000002+P_001101020*QR_000000000010+P_001101120*QR_000000000011+P_001101220*QR_000000000012+P_101001020*QR_000000000100+P_101001120*QR_000000000101+P_101001220*QR_000000000102+P_101101020*QR_000000000110+P_101101120*QR_000000000111+QR_000000000112);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000002020*QR_000000000000+P_000002120*QR_000000000001+P_000002220*QR_000000000002+P_000102020*QR_000000000010+P_000102120*QR_000000000011+P_000102220*QR_000000000012+P_000202020*QR_000000000020+P_000202120*QR_000000000021+QR_000000000022);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(P_001000021*QR_000000000000+P_001000121*QR_000000000001+P_001000221*QR_000000000002+P_001000321*QR_000000000003+P_101000021*QR_000000000100+P_101000121*QR_000000000101+P_101000221*QR_000000000102+QR_000000000103);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(P_000001021*QR_000000000000+P_000001121*QR_000000000001+P_000001221*QR_000000000002+P_000001321*QR_000000000003+P_000101021*QR_000000000010+P_000101121*QR_000000000011+P_000101221*QR_000000000012+QR_000000000013);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(P_000000022*QR_000000000000+P_000000122*QR_000000000001+P_000000222*QR_000000000002+P_000000322*QR_000000000003+QR_000000000004);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ddss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+		double Pd_101[3];
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_202[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		double Pd_312[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_220[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		double Pd_321[3];
+		double Pd_022[3];
+		double Pd_122[3];
+		double Pd_222[3];
+		double Pd_322[3];
+		double Pd_422[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=aPin1*(2.000000*Pd_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_202[i]=aPin1*(Pd_101[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=aPin1*(Pd_002[i]+2.000000*Pd_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=aPin1*(0.500000*Pd_102[i]+Pd_111[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_312[i]=aPin1*(0.333333*Pd_202[i]+0.666667*Pd_211[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=aPin1*(2.000000*Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_220[i]=aPin1*(Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=aPin1*(2.000000*Pd_011[i]+Pd_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=aPin1*(Pd_111[i]+0.500000*Pd_120[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_321[i]=aPin1*(0.666667*Pd_211[i]+0.333333*Pd_220[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_022[i]=Pd_112[i]+Pd_010[i]*Pd_012[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_122[i]=aPin1*2.000000*(Pd_012[i]+Pd_021[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_222[i]=aPin1*(Pd_112[i]+Pd_121[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_322[i]=aPin1*0.666667*(Pd_212[i]+Pd_221[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_422[i]=aPin1*0.500000*(Pd_312[i]+Pd_321[i]);
+			}
+	double P_022000000=Pd_022[0];
+	double P_122000000=Pd_122[0];
+	double P_222000000=Pd_222[0];
+	double P_322000000=Pd_322[0];
+	double P_422000000=Pd_422[0];
+	double P_021001000=Pd_021[0]*Pd_001[1];
+	double P_021101000=Pd_021[0]*Pd_101[1];
+	double P_121001000=Pd_121[0]*Pd_001[1];
+	double P_121101000=Pd_121[0]*Pd_101[1];
+	double P_221001000=Pd_221[0]*Pd_001[1];
+	double P_221101000=Pd_221[0]*Pd_101[1];
+	double P_321001000=Pd_321[0]*Pd_001[1];
+	double P_321101000=Pd_321[0]*Pd_101[1];
+	double P_020002000=Pd_020[0]*Pd_002[1];
+	double P_020102000=Pd_020[0]*Pd_102[1];
+	double P_020202000=Pd_020[0]*Pd_202[1];
+	double P_120002000=Pd_120[0]*Pd_002[1];
+	double P_120102000=Pd_120[0]*Pd_102[1];
+	double P_120202000=Pd_120[0]*Pd_202[1];
+	double P_220002000=Pd_220[0]*Pd_002[1];
+	double P_220102000=Pd_220[0]*Pd_102[1];
+	double P_220202000=Pd_220[0]*Pd_202[1];
+	double P_021000001=Pd_021[0]*Pd_001[2];
+	double P_021000101=Pd_021[0]*Pd_101[2];
+	double P_121000001=Pd_121[0]*Pd_001[2];
+	double P_121000101=Pd_121[0]*Pd_101[2];
+	double P_221000001=Pd_221[0]*Pd_001[2];
+	double P_221000101=Pd_221[0]*Pd_101[2];
+	double P_321000001=Pd_321[0]*Pd_001[2];
+	double P_321000101=Pd_321[0]*Pd_101[2];
+	double P_020001001=Pd_020[0]*Pd_001[1]*Pd_001[2];
+	double P_020001101=Pd_020[0]*Pd_001[1]*Pd_101[2];
+	double P_020101001=Pd_020[0]*Pd_101[1]*Pd_001[2];
+	double P_020101101=Pd_020[0]*Pd_101[1]*Pd_101[2];
+	double P_120001001=Pd_120[0]*Pd_001[1]*Pd_001[2];
+	double P_120001101=Pd_120[0]*Pd_001[1]*Pd_101[2];
+	double P_120101001=Pd_120[0]*Pd_101[1]*Pd_001[2];
+	double P_120101101=Pd_120[0]*Pd_101[1]*Pd_101[2];
+	double P_220001001=Pd_220[0]*Pd_001[1]*Pd_001[2];
+	double P_220001101=Pd_220[0]*Pd_001[1]*Pd_101[2];
+	double P_220101001=Pd_220[0]*Pd_101[1]*Pd_001[2];
+	double P_220101101=Pd_220[0]*Pd_101[1]*Pd_101[2];
+	double P_020000002=Pd_020[0]*Pd_002[2];
+	double P_020000102=Pd_020[0]*Pd_102[2];
+	double P_020000202=Pd_020[0]*Pd_202[2];
+	double P_120000002=Pd_120[0]*Pd_002[2];
+	double P_120000102=Pd_120[0]*Pd_102[2];
+	double P_120000202=Pd_120[0]*Pd_202[2];
+	double P_220000002=Pd_220[0]*Pd_002[2];
+	double P_220000102=Pd_220[0]*Pd_102[2];
+	double P_220000202=Pd_220[0]*Pd_202[2];
+	double P_012010000=Pd_012[0]*Pd_010[1];
+	double P_012110000=Pd_012[0]*Pd_110[1];
+	double P_112010000=Pd_112[0]*Pd_010[1];
+	double P_112110000=Pd_112[0]*Pd_110[1];
+	double P_212010000=Pd_212[0]*Pd_010[1];
+	double P_212110000=Pd_212[0]*Pd_110[1];
+	double P_312010000=Pd_312[0]*Pd_010[1];
+	double P_312110000=Pd_312[0]*Pd_110[1];
+	double P_011011000=Pd_011[0]*Pd_011[1];
+	double P_011111000=Pd_011[0]*Pd_111[1];
+	double P_011211000=Pd_011[0]*Pd_211[1];
+	double P_111011000=Pd_111[0]*Pd_011[1];
+	double P_111111000=Pd_111[0]*Pd_111[1];
+	double P_111211000=Pd_111[0]*Pd_211[1];
+	double P_211011000=Pd_211[0]*Pd_011[1];
+	double P_211111000=Pd_211[0]*Pd_111[1];
+	double P_211211000=Pd_211[0]*Pd_211[1];
+	double P_010012000=Pd_010[0]*Pd_012[1];
+	double P_010112000=Pd_010[0]*Pd_112[1];
+	double P_010212000=Pd_010[0]*Pd_212[1];
+	double P_010312000=Pd_010[0]*Pd_312[1];
+	double P_110012000=Pd_110[0]*Pd_012[1];
+	double P_110112000=Pd_110[0]*Pd_112[1];
+	double P_110212000=Pd_110[0]*Pd_212[1];
+	double P_110312000=Pd_110[0]*Pd_312[1];
+	double P_011010001=Pd_011[0]*Pd_010[1]*Pd_001[2];
+	double P_011010101=Pd_011[0]*Pd_010[1]*Pd_101[2];
+	double P_011110001=Pd_011[0]*Pd_110[1]*Pd_001[2];
+	double P_011110101=Pd_011[0]*Pd_110[1]*Pd_101[2];
+	double P_111010001=Pd_111[0]*Pd_010[1]*Pd_001[2];
+	double P_111010101=Pd_111[0]*Pd_010[1]*Pd_101[2];
+	double P_111110001=Pd_111[0]*Pd_110[1]*Pd_001[2];
+	double P_111110101=Pd_111[0]*Pd_110[1]*Pd_101[2];
+	double P_211010001=Pd_211[0]*Pd_010[1]*Pd_001[2];
+	double P_211010101=Pd_211[0]*Pd_010[1]*Pd_101[2];
+	double P_211110001=Pd_211[0]*Pd_110[1]*Pd_001[2];
+	double P_211110101=Pd_211[0]*Pd_110[1]*Pd_101[2];
+	double P_010011001=Pd_010[0]*Pd_011[1]*Pd_001[2];
+	double P_010011101=Pd_010[0]*Pd_011[1]*Pd_101[2];
+	double P_010111001=Pd_010[0]*Pd_111[1]*Pd_001[2];
+	double P_010111101=Pd_010[0]*Pd_111[1]*Pd_101[2];
+	double P_010211001=Pd_010[0]*Pd_211[1]*Pd_001[2];
+	double P_010211101=Pd_010[0]*Pd_211[1]*Pd_101[2];
+	double P_110011001=Pd_110[0]*Pd_011[1]*Pd_001[2];
+	double P_110011101=Pd_110[0]*Pd_011[1]*Pd_101[2];
+	double P_110111001=Pd_110[0]*Pd_111[1]*Pd_001[2];
+	double P_110111101=Pd_110[0]*Pd_111[1]*Pd_101[2];
+	double P_110211001=Pd_110[0]*Pd_211[1]*Pd_001[2];
+	double P_110211101=Pd_110[0]*Pd_211[1]*Pd_101[2];
+	double P_010010002=Pd_010[0]*Pd_010[1]*Pd_002[2];
+	double P_010010102=Pd_010[0]*Pd_010[1]*Pd_102[2];
+	double P_010010202=Pd_010[0]*Pd_010[1]*Pd_202[2];
+	double P_010110002=Pd_010[0]*Pd_110[1]*Pd_002[2];
+	double P_010110102=Pd_010[0]*Pd_110[1]*Pd_102[2];
+	double P_010110202=Pd_010[0]*Pd_110[1]*Pd_202[2];
+	double P_110010002=Pd_110[0]*Pd_010[1]*Pd_002[2];
+	double P_110010102=Pd_110[0]*Pd_010[1]*Pd_102[2];
+	double P_110010202=Pd_110[0]*Pd_010[1]*Pd_202[2];
+	double P_110110002=Pd_110[0]*Pd_110[1]*Pd_002[2];
+	double P_110110102=Pd_110[0]*Pd_110[1]*Pd_102[2];
+	double P_110110202=Pd_110[0]*Pd_110[1]*Pd_202[2];
+	double P_002020000=Pd_002[0]*Pd_020[1];
+	double P_002120000=Pd_002[0]*Pd_120[1];
+	double P_002220000=Pd_002[0]*Pd_220[1];
+	double P_102020000=Pd_102[0]*Pd_020[1];
+	double P_102120000=Pd_102[0]*Pd_120[1];
+	double P_102220000=Pd_102[0]*Pd_220[1];
+	double P_202020000=Pd_202[0]*Pd_020[1];
+	double P_202120000=Pd_202[0]*Pd_120[1];
+	double P_202220000=Pd_202[0]*Pd_220[1];
+	double P_001021000=Pd_001[0]*Pd_021[1];
+	double P_001121000=Pd_001[0]*Pd_121[1];
+	double P_001221000=Pd_001[0]*Pd_221[1];
+	double P_001321000=Pd_001[0]*Pd_321[1];
+	double P_101021000=Pd_101[0]*Pd_021[1];
+	double P_101121000=Pd_101[0]*Pd_121[1];
+	double P_101221000=Pd_101[0]*Pd_221[1];
+	double P_101321000=Pd_101[0]*Pd_321[1];
+	double P_000022000=Pd_022[1];
+	double P_000122000=Pd_122[1];
+	double P_000222000=Pd_222[1];
+	double P_000322000=Pd_322[1];
+	double P_000422000=Pd_422[1];
+	double P_001020001=Pd_001[0]*Pd_020[1]*Pd_001[2];
+	double P_001020101=Pd_001[0]*Pd_020[1]*Pd_101[2];
+	double P_001120001=Pd_001[0]*Pd_120[1]*Pd_001[2];
+	double P_001120101=Pd_001[0]*Pd_120[1]*Pd_101[2];
+	double P_001220001=Pd_001[0]*Pd_220[1]*Pd_001[2];
+	double P_001220101=Pd_001[0]*Pd_220[1]*Pd_101[2];
+	double P_101020001=Pd_101[0]*Pd_020[1]*Pd_001[2];
+	double P_101020101=Pd_101[0]*Pd_020[1]*Pd_101[2];
+	double P_101120001=Pd_101[0]*Pd_120[1]*Pd_001[2];
+	double P_101120101=Pd_101[0]*Pd_120[1]*Pd_101[2];
+	double P_101220001=Pd_101[0]*Pd_220[1]*Pd_001[2];
+	double P_101220101=Pd_101[0]*Pd_220[1]*Pd_101[2];
+	double P_000021001=Pd_021[1]*Pd_001[2];
+	double P_000021101=Pd_021[1]*Pd_101[2];
+	double P_000121001=Pd_121[1]*Pd_001[2];
+	double P_000121101=Pd_121[1]*Pd_101[2];
+	double P_000221001=Pd_221[1]*Pd_001[2];
+	double P_000221101=Pd_221[1]*Pd_101[2];
+	double P_000321001=Pd_321[1]*Pd_001[2];
+	double P_000321101=Pd_321[1]*Pd_101[2];
+	double P_000020002=Pd_020[1]*Pd_002[2];
+	double P_000020102=Pd_020[1]*Pd_102[2];
+	double P_000020202=Pd_020[1]*Pd_202[2];
+	double P_000120002=Pd_120[1]*Pd_002[2];
+	double P_000120102=Pd_120[1]*Pd_102[2];
+	double P_000120202=Pd_120[1]*Pd_202[2];
+	double P_000220002=Pd_220[1]*Pd_002[2];
+	double P_000220102=Pd_220[1]*Pd_102[2];
+	double P_000220202=Pd_220[1]*Pd_202[2];
+	double P_012000010=Pd_012[0]*Pd_010[2];
+	double P_012000110=Pd_012[0]*Pd_110[2];
+	double P_112000010=Pd_112[0]*Pd_010[2];
+	double P_112000110=Pd_112[0]*Pd_110[2];
+	double P_212000010=Pd_212[0]*Pd_010[2];
+	double P_212000110=Pd_212[0]*Pd_110[2];
+	double P_312000010=Pd_312[0]*Pd_010[2];
+	double P_312000110=Pd_312[0]*Pd_110[2];
+	double P_011001010=Pd_011[0]*Pd_001[1]*Pd_010[2];
+	double P_011001110=Pd_011[0]*Pd_001[1]*Pd_110[2];
+	double P_011101010=Pd_011[0]*Pd_101[1]*Pd_010[2];
+	double P_011101110=Pd_011[0]*Pd_101[1]*Pd_110[2];
+	double P_111001010=Pd_111[0]*Pd_001[1]*Pd_010[2];
+	double P_111001110=Pd_111[0]*Pd_001[1]*Pd_110[2];
+	double P_111101010=Pd_111[0]*Pd_101[1]*Pd_010[2];
+	double P_111101110=Pd_111[0]*Pd_101[1]*Pd_110[2];
+	double P_211001010=Pd_211[0]*Pd_001[1]*Pd_010[2];
+	double P_211001110=Pd_211[0]*Pd_001[1]*Pd_110[2];
+	double P_211101010=Pd_211[0]*Pd_101[1]*Pd_010[2];
+	double P_211101110=Pd_211[0]*Pd_101[1]*Pd_110[2];
+	double P_010002010=Pd_010[0]*Pd_002[1]*Pd_010[2];
+	double P_010002110=Pd_010[0]*Pd_002[1]*Pd_110[2];
+	double P_010102010=Pd_010[0]*Pd_102[1]*Pd_010[2];
+	double P_010102110=Pd_010[0]*Pd_102[1]*Pd_110[2];
+	double P_010202010=Pd_010[0]*Pd_202[1]*Pd_010[2];
+	double P_010202110=Pd_010[0]*Pd_202[1]*Pd_110[2];
+	double P_110002010=Pd_110[0]*Pd_002[1]*Pd_010[2];
+	double P_110002110=Pd_110[0]*Pd_002[1]*Pd_110[2];
+	double P_110102010=Pd_110[0]*Pd_102[1]*Pd_010[2];
+	double P_110102110=Pd_110[0]*Pd_102[1]*Pd_110[2];
+	double P_110202010=Pd_110[0]*Pd_202[1]*Pd_010[2];
+	double P_110202110=Pd_110[0]*Pd_202[1]*Pd_110[2];
+	double P_011000011=Pd_011[0]*Pd_011[2];
+	double P_011000111=Pd_011[0]*Pd_111[2];
+	double P_011000211=Pd_011[0]*Pd_211[2];
+	double P_111000011=Pd_111[0]*Pd_011[2];
+	double P_111000111=Pd_111[0]*Pd_111[2];
+	double P_111000211=Pd_111[0]*Pd_211[2];
+	double P_211000011=Pd_211[0]*Pd_011[2];
+	double P_211000111=Pd_211[0]*Pd_111[2];
+	double P_211000211=Pd_211[0]*Pd_211[2];
+	double P_010001011=Pd_010[0]*Pd_001[1]*Pd_011[2];
+	double P_010001111=Pd_010[0]*Pd_001[1]*Pd_111[2];
+	double P_010001211=Pd_010[0]*Pd_001[1]*Pd_211[2];
+	double P_010101011=Pd_010[0]*Pd_101[1]*Pd_011[2];
+	double P_010101111=Pd_010[0]*Pd_101[1]*Pd_111[2];
+	double P_010101211=Pd_010[0]*Pd_101[1]*Pd_211[2];
+	double P_110001011=Pd_110[0]*Pd_001[1]*Pd_011[2];
+	double P_110001111=Pd_110[0]*Pd_001[1]*Pd_111[2];
+	double P_110001211=Pd_110[0]*Pd_001[1]*Pd_211[2];
+	double P_110101011=Pd_110[0]*Pd_101[1]*Pd_011[2];
+	double P_110101111=Pd_110[0]*Pd_101[1]*Pd_111[2];
+	double P_110101211=Pd_110[0]*Pd_101[1]*Pd_211[2];
+	double P_010000012=Pd_010[0]*Pd_012[2];
+	double P_010000112=Pd_010[0]*Pd_112[2];
+	double P_010000212=Pd_010[0]*Pd_212[2];
+	double P_010000312=Pd_010[0]*Pd_312[2];
+	double P_110000012=Pd_110[0]*Pd_012[2];
+	double P_110000112=Pd_110[0]*Pd_112[2];
+	double P_110000212=Pd_110[0]*Pd_212[2];
+	double P_110000312=Pd_110[0]*Pd_312[2];
+	double P_002010010=Pd_002[0]*Pd_010[1]*Pd_010[2];
+	double P_002010110=Pd_002[0]*Pd_010[1]*Pd_110[2];
+	double P_002110010=Pd_002[0]*Pd_110[1]*Pd_010[2];
+	double P_002110110=Pd_002[0]*Pd_110[1]*Pd_110[2];
+	double P_102010010=Pd_102[0]*Pd_010[1]*Pd_010[2];
+	double P_102010110=Pd_102[0]*Pd_010[1]*Pd_110[2];
+	double P_102110010=Pd_102[0]*Pd_110[1]*Pd_010[2];
+	double P_102110110=Pd_102[0]*Pd_110[1]*Pd_110[2];
+	double P_202010010=Pd_202[0]*Pd_010[1]*Pd_010[2];
+	double P_202010110=Pd_202[0]*Pd_010[1]*Pd_110[2];
+	double P_202110010=Pd_202[0]*Pd_110[1]*Pd_010[2];
+	double P_202110110=Pd_202[0]*Pd_110[1]*Pd_110[2];
+	double P_001011010=Pd_001[0]*Pd_011[1]*Pd_010[2];
+	double P_001011110=Pd_001[0]*Pd_011[1]*Pd_110[2];
+	double P_001111010=Pd_001[0]*Pd_111[1]*Pd_010[2];
+	double P_001111110=Pd_001[0]*Pd_111[1]*Pd_110[2];
+	double P_001211010=Pd_001[0]*Pd_211[1]*Pd_010[2];
+	double P_001211110=Pd_001[0]*Pd_211[1]*Pd_110[2];
+	double P_101011010=Pd_101[0]*Pd_011[1]*Pd_010[2];
+	double P_101011110=Pd_101[0]*Pd_011[1]*Pd_110[2];
+	double P_101111010=Pd_101[0]*Pd_111[1]*Pd_010[2];
+	double P_101111110=Pd_101[0]*Pd_111[1]*Pd_110[2];
+	double P_101211010=Pd_101[0]*Pd_211[1]*Pd_010[2];
+	double P_101211110=Pd_101[0]*Pd_211[1]*Pd_110[2];
+	double P_000012010=Pd_012[1]*Pd_010[2];
+	double P_000012110=Pd_012[1]*Pd_110[2];
+	double P_000112010=Pd_112[1]*Pd_010[2];
+	double P_000112110=Pd_112[1]*Pd_110[2];
+	double P_000212010=Pd_212[1]*Pd_010[2];
+	double P_000212110=Pd_212[1]*Pd_110[2];
+	double P_000312010=Pd_312[1]*Pd_010[2];
+	double P_000312110=Pd_312[1]*Pd_110[2];
+	double P_001010011=Pd_001[0]*Pd_010[1]*Pd_011[2];
+	double P_001010111=Pd_001[0]*Pd_010[1]*Pd_111[2];
+	double P_001010211=Pd_001[0]*Pd_010[1]*Pd_211[2];
+	double P_001110011=Pd_001[0]*Pd_110[1]*Pd_011[2];
+	double P_001110111=Pd_001[0]*Pd_110[1]*Pd_111[2];
+	double P_001110211=Pd_001[0]*Pd_110[1]*Pd_211[2];
+	double P_101010011=Pd_101[0]*Pd_010[1]*Pd_011[2];
+	double P_101010111=Pd_101[0]*Pd_010[1]*Pd_111[2];
+	double P_101010211=Pd_101[0]*Pd_010[1]*Pd_211[2];
+	double P_101110011=Pd_101[0]*Pd_110[1]*Pd_011[2];
+	double P_101110111=Pd_101[0]*Pd_110[1]*Pd_111[2];
+	double P_101110211=Pd_101[0]*Pd_110[1]*Pd_211[2];
+	double P_000011011=Pd_011[1]*Pd_011[2];
+	double P_000011111=Pd_011[1]*Pd_111[2];
+	double P_000011211=Pd_011[1]*Pd_211[2];
+	double P_000111011=Pd_111[1]*Pd_011[2];
+	double P_000111111=Pd_111[1]*Pd_111[2];
+	double P_000111211=Pd_111[1]*Pd_211[2];
+	double P_000211011=Pd_211[1]*Pd_011[2];
+	double P_000211111=Pd_211[1]*Pd_111[2];
+	double P_000211211=Pd_211[1]*Pd_211[2];
+	double P_000010012=Pd_010[1]*Pd_012[2];
+	double P_000010112=Pd_010[1]*Pd_112[2];
+	double P_000010212=Pd_010[1]*Pd_212[2];
+	double P_000010312=Pd_010[1]*Pd_312[2];
+	double P_000110012=Pd_110[1]*Pd_012[2];
+	double P_000110112=Pd_110[1]*Pd_112[2];
+	double P_000110212=Pd_110[1]*Pd_212[2];
+	double P_000110312=Pd_110[1]*Pd_312[2];
+	double P_002000020=Pd_002[0]*Pd_020[2];
+	double P_002000120=Pd_002[0]*Pd_120[2];
+	double P_002000220=Pd_002[0]*Pd_220[2];
+	double P_102000020=Pd_102[0]*Pd_020[2];
+	double P_102000120=Pd_102[0]*Pd_120[2];
+	double P_102000220=Pd_102[0]*Pd_220[2];
+	double P_202000020=Pd_202[0]*Pd_020[2];
+	double P_202000120=Pd_202[0]*Pd_120[2];
+	double P_202000220=Pd_202[0]*Pd_220[2];
+	double P_001001020=Pd_001[0]*Pd_001[1]*Pd_020[2];
+	double P_001001120=Pd_001[0]*Pd_001[1]*Pd_120[2];
+	double P_001001220=Pd_001[0]*Pd_001[1]*Pd_220[2];
+	double P_001101020=Pd_001[0]*Pd_101[1]*Pd_020[2];
+	double P_001101120=Pd_001[0]*Pd_101[1]*Pd_120[2];
+	double P_001101220=Pd_001[0]*Pd_101[1]*Pd_220[2];
+	double P_101001020=Pd_101[0]*Pd_001[1]*Pd_020[2];
+	double P_101001120=Pd_101[0]*Pd_001[1]*Pd_120[2];
+	double P_101001220=Pd_101[0]*Pd_001[1]*Pd_220[2];
+	double P_101101020=Pd_101[0]*Pd_101[1]*Pd_020[2];
+	double P_101101120=Pd_101[0]*Pd_101[1]*Pd_120[2];
+	double P_101101220=Pd_101[0]*Pd_101[1]*Pd_220[2];
+	double P_000002020=Pd_002[1]*Pd_020[2];
+	double P_000002120=Pd_002[1]*Pd_120[2];
+	double P_000002220=Pd_002[1]*Pd_220[2];
+	double P_000102020=Pd_102[1]*Pd_020[2];
+	double P_000102120=Pd_102[1]*Pd_120[2];
+	double P_000102220=Pd_102[1]*Pd_220[2];
+	double P_000202020=Pd_202[1]*Pd_020[2];
+	double P_000202120=Pd_202[1]*Pd_120[2];
+	double P_000202220=Pd_202[1]*Pd_220[2];
+	double P_001000021=Pd_001[0]*Pd_021[2];
+	double P_001000121=Pd_001[0]*Pd_121[2];
+	double P_001000221=Pd_001[0]*Pd_221[2];
+	double P_001000321=Pd_001[0]*Pd_321[2];
+	double P_101000021=Pd_101[0]*Pd_021[2];
+	double P_101000121=Pd_101[0]*Pd_121[2];
+	double P_101000221=Pd_101[0]*Pd_221[2];
+	double P_101000321=Pd_101[0]*Pd_321[2];
+	double P_000001021=Pd_001[1]*Pd_021[2];
+	double P_000001121=Pd_001[1]*Pd_121[2];
+	double P_000001221=Pd_001[1]*Pd_221[2];
+	double P_000001321=Pd_001[1]*Pd_321[2];
+	double P_000101021=Pd_101[1]*Pd_021[2];
+	double P_000101121=Pd_101[1]*Pd_121[2];
+	double P_000101221=Pd_101[1]*Pd_221[2];
+	double P_000101321=Pd_101[1]*Pd_321[2];
+	double P_000000022=Pd_022[2];
+	double P_000000122=Pd_122[2];
+	double P_000000222=Pd_222[2];
+	double P_000000322=Pd_322[2];
+	double P_000000422=Pd_422[2];
+				double PR_022000000000=P_022000000*R_000[0]+-1*P_122000000*R_100[0]+P_222000000*R_200[0]+-1*P_322000000*R_300[0]+P_422000000*R_400[0];
+				double PR_021001000000=P_021001000*R_000[0]+-1*P_021101000*R_010[0]+-1*P_121001000*R_100[0]+P_121101000*R_110[0]+P_221001000*R_200[0]+-1*P_221101000*R_210[0]+-1*P_321001000*R_300[0]+P_321101000*R_310[0];
+				double PR_020002000000=P_020002000*R_000[0]+-1*P_020102000*R_010[0]+P_020202000*R_020[0]+-1*P_120002000*R_100[0]+P_120102000*R_110[0]+-1*P_120202000*R_120[0]+P_220002000*R_200[0]+-1*P_220102000*R_210[0]+P_220202000*R_220[0];
+				double PR_021000001000=P_021000001*R_000[0]+-1*P_021000101*R_001[0]+-1*P_121000001*R_100[0]+P_121000101*R_101[0]+P_221000001*R_200[0]+-1*P_221000101*R_201[0]+-1*P_321000001*R_300[0]+P_321000101*R_301[0];
+				double PR_020001001000=P_020001001*R_000[0]+-1*P_020001101*R_001[0]+-1*P_020101001*R_010[0]+P_020101101*R_011[0]+-1*P_120001001*R_100[0]+P_120001101*R_101[0]+P_120101001*R_110[0]+-1*P_120101101*R_111[0]+P_220001001*R_200[0]+-1*P_220001101*R_201[0]+-1*P_220101001*R_210[0]+P_220101101*R_211[0];
+				double PR_020000002000=P_020000002*R_000[0]+-1*P_020000102*R_001[0]+P_020000202*R_002[0]+-1*P_120000002*R_100[0]+P_120000102*R_101[0]+-1*P_120000202*R_102[0]+P_220000002*R_200[0]+-1*P_220000102*R_201[0]+P_220000202*R_202[0];
+				double PR_012010000000=P_012010000*R_000[0]+-1*P_012110000*R_010[0]+-1*P_112010000*R_100[0]+P_112110000*R_110[0]+P_212010000*R_200[0]+-1*P_212110000*R_210[0]+-1*P_312010000*R_300[0]+P_312110000*R_310[0];
+				double PR_011011000000=P_011011000*R_000[0]+-1*P_011111000*R_010[0]+P_011211000*R_020[0]+-1*P_111011000*R_100[0]+P_111111000*R_110[0]+-1*P_111211000*R_120[0]+P_211011000*R_200[0]+-1*P_211111000*R_210[0]+P_211211000*R_220[0];
+				double PR_010012000000=P_010012000*R_000[0]+-1*P_010112000*R_010[0]+P_010212000*R_020[0]+-1*P_010312000*R_030[0]+-1*P_110012000*R_100[0]+P_110112000*R_110[0]+-1*P_110212000*R_120[0]+P_110312000*R_130[0];
+				double PR_011010001000=P_011010001*R_000[0]+-1*P_011010101*R_001[0]+-1*P_011110001*R_010[0]+P_011110101*R_011[0]+-1*P_111010001*R_100[0]+P_111010101*R_101[0]+P_111110001*R_110[0]+-1*P_111110101*R_111[0]+P_211010001*R_200[0]+-1*P_211010101*R_201[0]+-1*P_211110001*R_210[0]+P_211110101*R_211[0];
+				double PR_010011001000=P_010011001*R_000[0]+-1*P_010011101*R_001[0]+-1*P_010111001*R_010[0]+P_010111101*R_011[0]+P_010211001*R_020[0]+-1*P_010211101*R_021[0]+-1*P_110011001*R_100[0]+P_110011101*R_101[0]+P_110111001*R_110[0]+-1*P_110111101*R_111[0]+-1*P_110211001*R_120[0]+P_110211101*R_121[0];
+				double PR_010010002000=P_010010002*R_000[0]+-1*P_010010102*R_001[0]+P_010010202*R_002[0]+-1*P_010110002*R_010[0]+P_010110102*R_011[0]+-1*P_010110202*R_012[0]+-1*P_110010002*R_100[0]+P_110010102*R_101[0]+-1*P_110010202*R_102[0]+P_110110002*R_110[0]+-1*P_110110102*R_111[0]+P_110110202*R_112[0];
+				double PR_002020000000=P_002020000*R_000[0]+-1*P_002120000*R_010[0]+P_002220000*R_020[0]+-1*P_102020000*R_100[0]+P_102120000*R_110[0]+-1*P_102220000*R_120[0]+P_202020000*R_200[0]+-1*P_202120000*R_210[0]+P_202220000*R_220[0];
+				double PR_001021000000=P_001021000*R_000[0]+-1*P_001121000*R_010[0]+P_001221000*R_020[0]+-1*P_001321000*R_030[0]+-1*P_101021000*R_100[0]+P_101121000*R_110[0]+-1*P_101221000*R_120[0]+P_101321000*R_130[0];
+				double PR_000022000000=P_000022000*R_000[0]+-1*P_000122000*R_010[0]+P_000222000*R_020[0]+-1*P_000322000*R_030[0]+P_000422000*R_040[0];
+				double PR_001020001000=P_001020001*R_000[0]+-1*P_001020101*R_001[0]+-1*P_001120001*R_010[0]+P_001120101*R_011[0]+P_001220001*R_020[0]+-1*P_001220101*R_021[0]+-1*P_101020001*R_100[0]+P_101020101*R_101[0]+P_101120001*R_110[0]+-1*P_101120101*R_111[0]+-1*P_101220001*R_120[0]+P_101220101*R_121[0];
+				double PR_000021001000=P_000021001*R_000[0]+-1*P_000021101*R_001[0]+-1*P_000121001*R_010[0]+P_000121101*R_011[0]+P_000221001*R_020[0]+-1*P_000221101*R_021[0]+-1*P_000321001*R_030[0]+P_000321101*R_031[0];
+				double PR_000020002000=P_000020002*R_000[0]+-1*P_000020102*R_001[0]+P_000020202*R_002[0]+-1*P_000120002*R_010[0]+P_000120102*R_011[0]+-1*P_000120202*R_012[0]+P_000220002*R_020[0]+-1*P_000220102*R_021[0]+P_000220202*R_022[0];
+				double PR_012000010000=P_012000010*R_000[0]+-1*P_012000110*R_001[0]+-1*P_112000010*R_100[0]+P_112000110*R_101[0]+P_212000010*R_200[0]+-1*P_212000110*R_201[0]+-1*P_312000010*R_300[0]+P_312000110*R_301[0];
+				double PR_011001010000=P_011001010*R_000[0]+-1*P_011001110*R_001[0]+-1*P_011101010*R_010[0]+P_011101110*R_011[0]+-1*P_111001010*R_100[0]+P_111001110*R_101[0]+P_111101010*R_110[0]+-1*P_111101110*R_111[0]+P_211001010*R_200[0]+-1*P_211001110*R_201[0]+-1*P_211101010*R_210[0]+P_211101110*R_211[0];
+				double PR_010002010000=P_010002010*R_000[0]+-1*P_010002110*R_001[0]+-1*P_010102010*R_010[0]+P_010102110*R_011[0]+P_010202010*R_020[0]+-1*P_010202110*R_021[0]+-1*P_110002010*R_100[0]+P_110002110*R_101[0]+P_110102010*R_110[0]+-1*P_110102110*R_111[0]+-1*P_110202010*R_120[0]+P_110202110*R_121[0];
+				double PR_011000011000=P_011000011*R_000[0]+-1*P_011000111*R_001[0]+P_011000211*R_002[0]+-1*P_111000011*R_100[0]+P_111000111*R_101[0]+-1*P_111000211*R_102[0]+P_211000011*R_200[0]+-1*P_211000111*R_201[0]+P_211000211*R_202[0];
+				double PR_010001011000=P_010001011*R_000[0]+-1*P_010001111*R_001[0]+P_010001211*R_002[0]+-1*P_010101011*R_010[0]+P_010101111*R_011[0]+-1*P_010101211*R_012[0]+-1*P_110001011*R_100[0]+P_110001111*R_101[0]+-1*P_110001211*R_102[0]+P_110101011*R_110[0]+-1*P_110101111*R_111[0]+P_110101211*R_112[0];
+				double PR_010000012000=P_010000012*R_000[0]+-1*P_010000112*R_001[0]+P_010000212*R_002[0]+-1*P_010000312*R_003[0]+-1*P_110000012*R_100[0]+P_110000112*R_101[0]+-1*P_110000212*R_102[0]+P_110000312*R_103[0];
+				double PR_002010010000=P_002010010*R_000[0]+-1*P_002010110*R_001[0]+-1*P_002110010*R_010[0]+P_002110110*R_011[0]+-1*P_102010010*R_100[0]+P_102010110*R_101[0]+P_102110010*R_110[0]+-1*P_102110110*R_111[0]+P_202010010*R_200[0]+-1*P_202010110*R_201[0]+-1*P_202110010*R_210[0]+P_202110110*R_211[0];
+				double PR_001011010000=P_001011010*R_000[0]+-1*P_001011110*R_001[0]+-1*P_001111010*R_010[0]+P_001111110*R_011[0]+P_001211010*R_020[0]+-1*P_001211110*R_021[0]+-1*P_101011010*R_100[0]+P_101011110*R_101[0]+P_101111010*R_110[0]+-1*P_101111110*R_111[0]+-1*P_101211010*R_120[0]+P_101211110*R_121[0];
+				double PR_000012010000=P_000012010*R_000[0]+-1*P_000012110*R_001[0]+-1*P_000112010*R_010[0]+P_000112110*R_011[0]+P_000212010*R_020[0]+-1*P_000212110*R_021[0]+-1*P_000312010*R_030[0]+P_000312110*R_031[0];
+				double PR_001010011000=P_001010011*R_000[0]+-1*P_001010111*R_001[0]+P_001010211*R_002[0]+-1*P_001110011*R_010[0]+P_001110111*R_011[0]+-1*P_001110211*R_012[0]+-1*P_101010011*R_100[0]+P_101010111*R_101[0]+-1*P_101010211*R_102[0]+P_101110011*R_110[0]+-1*P_101110111*R_111[0]+P_101110211*R_112[0];
+				double PR_000011011000=P_000011011*R_000[0]+-1*P_000011111*R_001[0]+P_000011211*R_002[0]+-1*P_000111011*R_010[0]+P_000111111*R_011[0]+-1*P_000111211*R_012[0]+P_000211011*R_020[0]+-1*P_000211111*R_021[0]+P_000211211*R_022[0];
+				double PR_000010012000=P_000010012*R_000[0]+-1*P_000010112*R_001[0]+P_000010212*R_002[0]+-1*P_000010312*R_003[0]+-1*P_000110012*R_010[0]+P_000110112*R_011[0]+-1*P_000110212*R_012[0]+P_000110312*R_013[0];
+				double PR_002000020000=P_002000020*R_000[0]+-1*P_002000120*R_001[0]+P_002000220*R_002[0]+-1*P_102000020*R_100[0]+P_102000120*R_101[0]+-1*P_102000220*R_102[0]+P_202000020*R_200[0]+-1*P_202000120*R_201[0]+P_202000220*R_202[0];
+				double PR_001001020000=P_001001020*R_000[0]+-1*P_001001120*R_001[0]+P_001001220*R_002[0]+-1*P_001101020*R_010[0]+P_001101120*R_011[0]+-1*P_001101220*R_012[0]+-1*P_101001020*R_100[0]+P_101001120*R_101[0]+-1*P_101001220*R_102[0]+P_101101020*R_110[0]+-1*P_101101120*R_111[0]+P_101101220*R_112[0];
+				double PR_000002020000=P_000002020*R_000[0]+-1*P_000002120*R_001[0]+P_000002220*R_002[0]+-1*P_000102020*R_010[0]+P_000102120*R_011[0]+-1*P_000102220*R_012[0]+P_000202020*R_020[0]+-1*P_000202120*R_021[0]+P_000202220*R_022[0];
+				double PR_001000021000=P_001000021*R_000[0]+-1*P_001000121*R_001[0]+P_001000221*R_002[0]+-1*P_001000321*R_003[0]+-1*P_101000021*R_100[0]+P_101000121*R_101[0]+-1*P_101000221*R_102[0]+P_101000321*R_103[0];
+				double PR_000001021000=P_000001021*R_000[0]+-1*P_000001121*R_001[0]+P_000001221*R_002[0]+-1*P_000001321*R_003[0]+-1*P_000101021*R_010[0]+P_000101121*R_011[0]+-1*P_000101221*R_012[0]+P_000101321*R_013[0];
+				double PR_000000022000=P_000000022*R_000[0]+-1*P_000000122*R_001[0]+P_000000222*R_002[0]+-1*P_000000322*R_003[0]+P_000000422*R_004[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_022000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_021001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020002000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(PR_021000001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(PR_020001001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(PR_020000002000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_012010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_011011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010012000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(PR_011010001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(PR_010011001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(PR_010010002000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_002020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_001021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000022000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(PR_001020001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(PR_000021001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(PR_000020002000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_012000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_011001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010002010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(PR_011000011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(PR_010001011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(PR_010000012000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_002010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_001011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000012010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(PR_001010011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(PR_000011011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(PR_000010012000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_002000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_001001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000002020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(PR_001000021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(PR_000001021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(PR_000000022000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ddss_NRR(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+				double QR_000000000000=R_000[0];
+				double QR_000000000001=R_001[0];
+				double QR_000000000010=R_010[0];
+				double QR_000000000100=R_100[0];
+				double QR_000000000002=R_002[0];
+				double QR_000000000011=R_011[0];
+				double QR_000000000020=R_020[0];
+				double QR_000000000101=R_101[0];
+				double QR_000000000110=R_110[0];
+				double QR_000000000200=R_200[0];
+				double QR_000000000003=R_003[0];
+				double QR_000000000012=R_012[0];
+				double QR_000000000021=R_021[0];
+				double QR_000000000030=R_030[0];
+				double QR_000000000102=R_102[0];
+				double QR_000000000111=R_111[0];
+				double QR_000000000120=R_120[0];
+				double QR_000000000201=R_201[0];
+				double QR_000000000210=R_210[0];
+				double QR_000000000300=R_300[0];
+				double QR_000000000004=R_004[0];
+				double QR_000000000013=R_013[0];
+				double QR_000000000022=R_022[0];
+				double QR_000000000031=R_031[0];
+				double QR_000000000040=R_040[0];
+				double QR_000000000103=R_103[0];
+				double QR_000000000112=R_112[0];
+				double QR_000000000121=R_121[0];
+				double QR_000000000130=R_130[0];
+				double QR_000000000202=R_202[0];
+				double QR_000000000211=R_211[0];
+				double QR_000000000220=R_220[0];
+				double QR_000000000301=R_301[0];
+				double QR_000000000310=R_310[0];
+				double QR_000000000400=R_400[0];
+		double Pd_101[3];
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_202[3];
+		double Pd_110[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_211[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		double Pd_312[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_220[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		double Pd_321[3];
+		double Pd_022[3];
+		double Pd_122[3];
+		double Pd_222[3];
+		double Pd_322[3];
+		double Pd_422[3];
+		for(int i=0;i<3;i++){
+			Pd_101[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=aPin1*(2.000000*Pd_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_202[i]=aPin1*(Pd_101[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_110[i]=aPin1;
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=aPin1*(Pd_001[i]+Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_211[i]=aPin1*0.500000*(Pd_101[i]+Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=aPin1*(Pd_002[i]+2.000000*Pd_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=aPin1*(0.500000*Pd_102[i]+Pd_111[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_312[i]=aPin1*(0.333333*Pd_202[i]+0.666667*Pd_211[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=aPin1*(2.000000*Pd_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_220[i]=aPin1*(Pd_110[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=aPin1*(2.000000*Pd_011[i]+Pd_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=aPin1*(Pd_111[i]+0.500000*Pd_120[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_321[i]=aPin1*(0.666667*Pd_211[i]+0.333333*Pd_220[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_022[i]=Pd_112[i]+Pd_010[i]*Pd_012[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_122[i]=aPin1*2.000000*(Pd_012[i]+Pd_021[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_222[i]=aPin1*(Pd_112[i]+Pd_121[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_322[i]=aPin1*0.666667*(Pd_212[i]+Pd_221[i]);
+			}
+		for(int i=0;i<3;i++){
+			Pd_422[i]=aPin1*0.500000*(Pd_312[i]+Pd_321[i]);
+			}
+	double P_022000000=Pd_022[0];
+	double P_122000000=Pd_122[0];
+	double P_222000000=Pd_222[0];
+	double P_322000000=Pd_322[0];
+	double P_422000000=Pd_422[0];
+	double P_021001000=Pd_021[0]*Pd_001[1];
+	double P_021101000=Pd_021[0]*Pd_101[1];
+	double P_121001000=Pd_121[0]*Pd_001[1];
+	double P_121101000=Pd_121[0]*Pd_101[1];
+	double P_221001000=Pd_221[0]*Pd_001[1];
+	double P_221101000=Pd_221[0]*Pd_101[1];
+	double P_321001000=Pd_321[0]*Pd_001[1];
+	double P_321101000=Pd_321[0]*Pd_101[1];
+	double P_020002000=Pd_020[0]*Pd_002[1];
+	double P_020102000=Pd_020[0]*Pd_102[1];
+	double P_020202000=Pd_020[0]*Pd_202[1];
+	double P_120002000=Pd_120[0]*Pd_002[1];
+	double P_120102000=Pd_120[0]*Pd_102[1];
+	double P_120202000=Pd_120[0]*Pd_202[1];
+	double P_220002000=Pd_220[0]*Pd_002[1];
+	double P_220102000=Pd_220[0]*Pd_102[1];
+	double P_220202000=Pd_220[0]*Pd_202[1];
+	double P_021000001=Pd_021[0]*Pd_001[2];
+	double P_021000101=Pd_021[0]*Pd_101[2];
+	double P_121000001=Pd_121[0]*Pd_001[2];
+	double P_121000101=Pd_121[0]*Pd_101[2];
+	double P_221000001=Pd_221[0]*Pd_001[2];
+	double P_221000101=Pd_221[0]*Pd_101[2];
+	double P_321000001=Pd_321[0]*Pd_001[2];
+	double P_321000101=Pd_321[0]*Pd_101[2];
+	double P_020001001=Pd_020[0]*Pd_001[1]*Pd_001[2];
+	double P_020001101=Pd_020[0]*Pd_001[1]*Pd_101[2];
+	double P_020101001=Pd_020[0]*Pd_101[1]*Pd_001[2];
+	double P_020101101=Pd_020[0]*Pd_101[1]*Pd_101[2];
+	double P_120001001=Pd_120[0]*Pd_001[1]*Pd_001[2];
+	double P_120001101=Pd_120[0]*Pd_001[1]*Pd_101[2];
+	double P_120101001=Pd_120[0]*Pd_101[1]*Pd_001[2];
+	double P_120101101=Pd_120[0]*Pd_101[1]*Pd_101[2];
+	double P_220001001=Pd_220[0]*Pd_001[1]*Pd_001[2];
+	double P_220001101=Pd_220[0]*Pd_001[1]*Pd_101[2];
+	double P_220101001=Pd_220[0]*Pd_101[1]*Pd_001[2];
+	double P_220101101=Pd_220[0]*Pd_101[1]*Pd_101[2];
+	double P_020000002=Pd_020[0]*Pd_002[2];
+	double P_020000102=Pd_020[0]*Pd_102[2];
+	double P_020000202=Pd_020[0]*Pd_202[2];
+	double P_120000002=Pd_120[0]*Pd_002[2];
+	double P_120000102=Pd_120[0]*Pd_102[2];
+	double P_120000202=Pd_120[0]*Pd_202[2];
+	double P_220000002=Pd_220[0]*Pd_002[2];
+	double P_220000102=Pd_220[0]*Pd_102[2];
+	double P_220000202=Pd_220[0]*Pd_202[2];
+	double P_012010000=Pd_012[0]*Pd_010[1];
+	double P_012110000=Pd_012[0]*Pd_110[1];
+	double P_112010000=Pd_112[0]*Pd_010[1];
+	double P_112110000=Pd_112[0]*Pd_110[1];
+	double P_212010000=Pd_212[0]*Pd_010[1];
+	double P_212110000=Pd_212[0]*Pd_110[1];
+	double P_312010000=Pd_312[0]*Pd_010[1];
+	double P_312110000=Pd_312[0]*Pd_110[1];
+	double P_011011000=Pd_011[0]*Pd_011[1];
+	double P_011111000=Pd_011[0]*Pd_111[1];
+	double P_011211000=Pd_011[0]*Pd_211[1];
+	double P_111011000=Pd_111[0]*Pd_011[1];
+	double P_111111000=Pd_111[0]*Pd_111[1];
+	double P_111211000=Pd_111[0]*Pd_211[1];
+	double P_211011000=Pd_211[0]*Pd_011[1];
+	double P_211111000=Pd_211[0]*Pd_111[1];
+	double P_211211000=Pd_211[0]*Pd_211[1];
+	double P_010012000=Pd_010[0]*Pd_012[1];
+	double P_010112000=Pd_010[0]*Pd_112[1];
+	double P_010212000=Pd_010[0]*Pd_212[1];
+	double P_010312000=Pd_010[0]*Pd_312[1];
+	double P_110012000=Pd_110[0]*Pd_012[1];
+	double P_110112000=Pd_110[0]*Pd_112[1];
+	double P_110212000=Pd_110[0]*Pd_212[1];
+	double P_110312000=Pd_110[0]*Pd_312[1];
+	double P_011010001=Pd_011[0]*Pd_010[1]*Pd_001[2];
+	double P_011010101=Pd_011[0]*Pd_010[1]*Pd_101[2];
+	double P_011110001=Pd_011[0]*Pd_110[1]*Pd_001[2];
+	double P_011110101=Pd_011[0]*Pd_110[1]*Pd_101[2];
+	double P_111010001=Pd_111[0]*Pd_010[1]*Pd_001[2];
+	double P_111010101=Pd_111[0]*Pd_010[1]*Pd_101[2];
+	double P_111110001=Pd_111[0]*Pd_110[1]*Pd_001[2];
+	double P_111110101=Pd_111[0]*Pd_110[1]*Pd_101[2];
+	double P_211010001=Pd_211[0]*Pd_010[1]*Pd_001[2];
+	double P_211010101=Pd_211[0]*Pd_010[1]*Pd_101[2];
+	double P_211110001=Pd_211[0]*Pd_110[1]*Pd_001[2];
+	double P_211110101=Pd_211[0]*Pd_110[1]*Pd_101[2];
+	double P_010011001=Pd_010[0]*Pd_011[1]*Pd_001[2];
+	double P_010011101=Pd_010[0]*Pd_011[1]*Pd_101[2];
+	double P_010111001=Pd_010[0]*Pd_111[1]*Pd_001[2];
+	double P_010111101=Pd_010[0]*Pd_111[1]*Pd_101[2];
+	double P_010211001=Pd_010[0]*Pd_211[1]*Pd_001[2];
+	double P_010211101=Pd_010[0]*Pd_211[1]*Pd_101[2];
+	double P_110011001=Pd_110[0]*Pd_011[1]*Pd_001[2];
+	double P_110011101=Pd_110[0]*Pd_011[1]*Pd_101[2];
+	double P_110111001=Pd_110[0]*Pd_111[1]*Pd_001[2];
+	double P_110111101=Pd_110[0]*Pd_111[1]*Pd_101[2];
+	double P_110211001=Pd_110[0]*Pd_211[1]*Pd_001[2];
+	double P_110211101=Pd_110[0]*Pd_211[1]*Pd_101[2];
+	double P_010010002=Pd_010[0]*Pd_010[1]*Pd_002[2];
+	double P_010010102=Pd_010[0]*Pd_010[1]*Pd_102[2];
+	double P_010010202=Pd_010[0]*Pd_010[1]*Pd_202[2];
+	double P_010110002=Pd_010[0]*Pd_110[1]*Pd_002[2];
+	double P_010110102=Pd_010[0]*Pd_110[1]*Pd_102[2];
+	double P_010110202=Pd_010[0]*Pd_110[1]*Pd_202[2];
+	double P_110010002=Pd_110[0]*Pd_010[1]*Pd_002[2];
+	double P_110010102=Pd_110[0]*Pd_010[1]*Pd_102[2];
+	double P_110010202=Pd_110[0]*Pd_010[1]*Pd_202[2];
+	double P_110110002=Pd_110[0]*Pd_110[1]*Pd_002[2];
+	double P_110110102=Pd_110[0]*Pd_110[1]*Pd_102[2];
+	double P_110110202=Pd_110[0]*Pd_110[1]*Pd_202[2];
+	double P_002020000=Pd_002[0]*Pd_020[1];
+	double P_002120000=Pd_002[0]*Pd_120[1];
+	double P_002220000=Pd_002[0]*Pd_220[1];
+	double P_102020000=Pd_102[0]*Pd_020[1];
+	double P_102120000=Pd_102[0]*Pd_120[1];
+	double P_102220000=Pd_102[0]*Pd_220[1];
+	double P_202020000=Pd_202[0]*Pd_020[1];
+	double P_202120000=Pd_202[0]*Pd_120[1];
+	double P_202220000=Pd_202[0]*Pd_220[1];
+	double P_001021000=Pd_001[0]*Pd_021[1];
+	double P_001121000=Pd_001[0]*Pd_121[1];
+	double P_001221000=Pd_001[0]*Pd_221[1];
+	double P_001321000=Pd_001[0]*Pd_321[1];
+	double P_101021000=Pd_101[0]*Pd_021[1];
+	double P_101121000=Pd_101[0]*Pd_121[1];
+	double P_101221000=Pd_101[0]*Pd_221[1];
+	double P_101321000=Pd_101[0]*Pd_321[1];
+	double P_000022000=Pd_022[1];
+	double P_000122000=Pd_122[1];
+	double P_000222000=Pd_222[1];
+	double P_000322000=Pd_322[1];
+	double P_000422000=Pd_422[1];
+	double P_001020001=Pd_001[0]*Pd_020[1]*Pd_001[2];
+	double P_001020101=Pd_001[0]*Pd_020[1]*Pd_101[2];
+	double P_001120001=Pd_001[0]*Pd_120[1]*Pd_001[2];
+	double P_001120101=Pd_001[0]*Pd_120[1]*Pd_101[2];
+	double P_001220001=Pd_001[0]*Pd_220[1]*Pd_001[2];
+	double P_001220101=Pd_001[0]*Pd_220[1]*Pd_101[2];
+	double P_101020001=Pd_101[0]*Pd_020[1]*Pd_001[2];
+	double P_101020101=Pd_101[0]*Pd_020[1]*Pd_101[2];
+	double P_101120001=Pd_101[0]*Pd_120[1]*Pd_001[2];
+	double P_101120101=Pd_101[0]*Pd_120[1]*Pd_101[2];
+	double P_101220001=Pd_101[0]*Pd_220[1]*Pd_001[2];
+	double P_101220101=Pd_101[0]*Pd_220[1]*Pd_101[2];
+	double P_000021001=Pd_021[1]*Pd_001[2];
+	double P_000021101=Pd_021[1]*Pd_101[2];
+	double P_000121001=Pd_121[1]*Pd_001[2];
+	double P_000121101=Pd_121[1]*Pd_101[2];
+	double P_000221001=Pd_221[1]*Pd_001[2];
+	double P_000221101=Pd_221[1]*Pd_101[2];
+	double P_000321001=Pd_321[1]*Pd_001[2];
+	double P_000321101=Pd_321[1]*Pd_101[2];
+	double P_000020002=Pd_020[1]*Pd_002[2];
+	double P_000020102=Pd_020[1]*Pd_102[2];
+	double P_000020202=Pd_020[1]*Pd_202[2];
+	double P_000120002=Pd_120[1]*Pd_002[2];
+	double P_000120102=Pd_120[1]*Pd_102[2];
+	double P_000120202=Pd_120[1]*Pd_202[2];
+	double P_000220002=Pd_220[1]*Pd_002[2];
+	double P_000220102=Pd_220[1]*Pd_102[2];
+	double P_000220202=Pd_220[1]*Pd_202[2];
+	double P_012000010=Pd_012[0]*Pd_010[2];
+	double P_012000110=Pd_012[0]*Pd_110[2];
+	double P_112000010=Pd_112[0]*Pd_010[2];
+	double P_112000110=Pd_112[0]*Pd_110[2];
+	double P_212000010=Pd_212[0]*Pd_010[2];
+	double P_212000110=Pd_212[0]*Pd_110[2];
+	double P_312000010=Pd_312[0]*Pd_010[2];
+	double P_312000110=Pd_312[0]*Pd_110[2];
+	double P_011001010=Pd_011[0]*Pd_001[1]*Pd_010[2];
+	double P_011001110=Pd_011[0]*Pd_001[1]*Pd_110[2];
+	double P_011101010=Pd_011[0]*Pd_101[1]*Pd_010[2];
+	double P_011101110=Pd_011[0]*Pd_101[1]*Pd_110[2];
+	double P_111001010=Pd_111[0]*Pd_001[1]*Pd_010[2];
+	double P_111001110=Pd_111[0]*Pd_001[1]*Pd_110[2];
+	double P_111101010=Pd_111[0]*Pd_101[1]*Pd_010[2];
+	double P_111101110=Pd_111[0]*Pd_101[1]*Pd_110[2];
+	double P_211001010=Pd_211[0]*Pd_001[1]*Pd_010[2];
+	double P_211001110=Pd_211[0]*Pd_001[1]*Pd_110[2];
+	double P_211101010=Pd_211[0]*Pd_101[1]*Pd_010[2];
+	double P_211101110=Pd_211[0]*Pd_101[1]*Pd_110[2];
+	double P_010002010=Pd_010[0]*Pd_002[1]*Pd_010[2];
+	double P_010002110=Pd_010[0]*Pd_002[1]*Pd_110[2];
+	double P_010102010=Pd_010[0]*Pd_102[1]*Pd_010[2];
+	double P_010102110=Pd_010[0]*Pd_102[1]*Pd_110[2];
+	double P_010202010=Pd_010[0]*Pd_202[1]*Pd_010[2];
+	double P_010202110=Pd_010[0]*Pd_202[1]*Pd_110[2];
+	double P_110002010=Pd_110[0]*Pd_002[1]*Pd_010[2];
+	double P_110002110=Pd_110[0]*Pd_002[1]*Pd_110[2];
+	double P_110102010=Pd_110[0]*Pd_102[1]*Pd_010[2];
+	double P_110102110=Pd_110[0]*Pd_102[1]*Pd_110[2];
+	double P_110202010=Pd_110[0]*Pd_202[1]*Pd_010[2];
+	double P_110202110=Pd_110[0]*Pd_202[1]*Pd_110[2];
+	double P_011000011=Pd_011[0]*Pd_011[2];
+	double P_011000111=Pd_011[0]*Pd_111[2];
+	double P_011000211=Pd_011[0]*Pd_211[2];
+	double P_111000011=Pd_111[0]*Pd_011[2];
+	double P_111000111=Pd_111[0]*Pd_111[2];
+	double P_111000211=Pd_111[0]*Pd_211[2];
+	double P_211000011=Pd_211[0]*Pd_011[2];
+	double P_211000111=Pd_211[0]*Pd_111[2];
+	double P_211000211=Pd_211[0]*Pd_211[2];
+	double P_010001011=Pd_010[0]*Pd_001[1]*Pd_011[2];
+	double P_010001111=Pd_010[0]*Pd_001[1]*Pd_111[2];
+	double P_010001211=Pd_010[0]*Pd_001[1]*Pd_211[2];
+	double P_010101011=Pd_010[0]*Pd_101[1]*Pd_011[2];
+	double P_010101111=Pd_010[0]*Pd_101[1]*Pd_111[2];
+	double P_010101211=Pd_010[0]*Pd_101[1]*Pd_211[2];
+	double P_110001011=Pd_110[0]*Pd_001[1]*Pd_011[2];
+	double P_110001111=Pd_110[0]*Pd_001[1]*Pd_111[2];
+	double P_110001211=Pd_110[0]*Pd_001[1]*Pd_211[2];
+	double P_110101011=Pd_110[0]*Pd_101[1]*Pd_011[2];
+	double P_110101111=Pd_110[0]*Pd_101[1]*Pd_111[2];
+	double P_110101211=Pd_110[0]*Pd_101[1]*Pd_211[2];
+	double P_010000012=Pd_010[0]*Pd_012[2];
+	double P_010000112=Pd_010[0]*Pd_112[2];
+	double P_010000212=Pd_010[0]*Pd_212[2];
+	double P_010000312=Pd_010[0]*Pd_312[2];
+	double P_110000012=Pd_110[0]*Pd_012[2];
+	double P_110000112=Pd_110[0]*Pd_112[2];
+	double P_110000212=Pd_110[0]*Pd_212[2];
+	double P_110000312=Pd_110[0]*Pd_312[2];
+	double P_002010010=Pd_002[0]*Pd_010[1]*Pd_010[2];
+	double P_002010110=Pd_002[0]*Pd_010[1]*Pd_110[2];
+	double P_002110010=Pd_002[0]*Pd_110[1]*Pd_010[2];
+	double P_002110110=Pd_002[0]*Pd_110[1]*Pd_110[2];
+	double P_102010010=Pd_102[0]*Pd_010[1]*Pd_010[2];
+	double P_102010110=Pd_102[0]*Pd_010[1]*Pd_110[2];
+	double P_102110010=Pd_102[0]*Pd_110[1]*Pd_010[2];
+	double P_102110110=Pd_102[0]*Pd_110[1]*Pd_110[2];
+	double P_202010010=Pd_202[0]*Pd_010[1]*Pd_010[2];
+	double P_202010110=Pd_202[0]*Pd_010[1]*Pd_110[2];
+	double P_202110010=Pd_202[0]*Pd_110[1]*Pd_010[2];
+	double P_202110110=Pd_202[0]*Pd_110[1]*Pd_110[2];
+	double P_001011010=Pd_001[0]*Pd_011[1]*Pd_010[2];
+	double P_001011110=Pd_001[0]*Pd_011[1]*Pd_110[2];
+	double P_001111010=Pd_001[0]*Pd_111[1]*Pd_010[2];
+	double P_001111110=Pd_001[0]*Pd_111[1]*Pd_110[2];
+	double P_001211010=Pd_001[0]*Pd_211[1]*Pd_010[2];
+	double P_001211110=Pd_001[0]*Pd_211[1]*Pd_110[2];
+	double P_101011010=Pd_101[0]*Pd_011[1]*Pd_010[2];
+	double P_101011110=Pd_101[0]*Pd_011[1]*Pd_110[2];
+	double P_101111010=Pd_101[0]*Pd_111[1]*Pd_010[2];
+	double P_101111110=Pd_101[0]*Pd_111[1]*Pd_110[2];
+	double P_101211010=Pd_101[0]*Pd_211[1]*Pd_010[2];
+	double P_101211110=Pd_101[0]*Pd_211[1]*Pd_110[2];
+	double P_000012010=Pd_012[1]*Pd_010[2];
+	double P_000012110=Pd_012[1]*Pd_110[2];
+	double P_000112010=Pd_112[1]*Pd_010[2];
+	double P_000112110=Pd_112[1]*Pd_110[2];
+	double P_000212010=Pd_212[1]*Pd_010[2];
+	double P_000212110=Pd_212[1]*Pd_110[2];
+	double P_000312010=Pd_312[1]*Pd_010[2];
+	double P_000312110=Pd_312[1]*Pd_110[2];
+	double P_001010011=Pd_001[0]*Pd_010[1]*Pd_011[2];
+	double P_001010111=Pd_001[0]*Pd_010[1]*Pd_111[2];
+	double P_001010211=Pd_001[0]*Pd_010[1]*Pd_211[2];
+	double P_001110011=Pd_001[0]*Pd_110[1]*Pd_011[2];
+	double P_001110111=Pd_001[0]*Pd_110[1]*Pd_111[2];
+	double P_001110211=Pd_001[0]*Pd_110[1]*Pd_211[2];
+	double P_101010011=Pd_101[0]*Pd_010[1]*Pd_011[2];
+	double P_101010111=Pd_101[0]*Pd_010[1]*Pd_111[2];
+	double P_101010211=Pd_101[0]*Pd_010[1]*Pd_211[2];
+	double P_101110011=Pd_101[0]*Pd_110[1]*Pd_011[2];
+	double P_101110111=Pd_101[0]*Pd_110[1]*Pd_111[2];
+	double P_101110211=Pd_101[0]*Pd_110[1]*Pd_211[2];
+	double P_000011011=Pd_011[1]*Pd_011[2];
+	double P_000011111=Pd_011[1]*Pd_111[2];
+	double P_000011211=Pd_011[1]*Pd_211[2];
+	double P_000111011=Pd_111[1]*Pd_011[2];
+	double P_000111111=Pd_111[1]*Pd_111[2];
+	double P_000111211=Pd_111[1]*Pd_211[2];
+	double P_000211011=Pd_211[1]*Pd_011[2];
+	double P_000211111=Pd_211[1]*Pd_111[2];
+	double P_000211211=Pd_211[1]*Pd_211[2];
+	double P_000010012=Pd_010[1]*Pd_012[2];
+	double P_000010112=Pd_010[1]*Pd_112[2];
+	double P_000010212=Pd_010[1]*Pd_212[2];
+	double P_000010312=Pd_010[1]*Pd_312[2];
+	double P_000110012=Pd_110[1]*Pd_012[2];
+	double P_000110112=Pd_110[1]*Pd_112[2];
+	double P_000110212=Pd_110[1]*Pd_212[2];
+	double P_000110312=Pd_110[1]*Pd_312[2];
+	double P_002000020=Pd_002[0]*Pd_020[2];
+	double P_002000120=Pd_002[0]*Pd_120[2];
+	double P_002000220=Pd_002[0]*Pd_220[2];
+	double P_102000020=Pd_102[0]*Pd_020[2];
+	double P_102000120=Pd_102[0]*Pd_120[2];
+	double P_102000220=Pd_102[0]*Pd_220[2];
+	double P_202000020=Pd_202[0]*Pd_020[2];
+	double P_202000120=Pd_202[0]*Pd_120[2];
+	double P_202000220=Pd_202[0]*Pd_220[2];
+	double P_001001020=Pd_001[0]*Pd_001[1]*Pd_020[2];
+	double P_001001120=Pd_001[0]*Pd_001[1]*Pd_120[2];
+	double P_001001220=Pd_001[0]*Pd_001[1]*Pd_220[2];
+	double P_001101020=Pd_001[0]*Pd_101[1]*Pd_020[2];
+	double P_001101120=Pd_001[0]*Pd_101[1]*Pd_120[2];
+	double P_001101220=Pd_001[0]*Pd_101[1]*Pd_220[2];
+	double P_101001020=Pd_101[0]*Pd_001[1]*Pd_020[2];
+	double P_101001120=Pd_101[0]*Pd_001[1]*Pd_120[2];
+	double P_101001220=Pd_101[0]*Pd_001[1]*Pd_220[2];
+	double P_101101020=Pd_101[0]*Pd_101[1]*Pd_020[2];
+	double P_101101120=Pd_101[0]*Pd_101[1]*Pd_120[2];
+	double P_101101220=Pd_101[0]*Pd_101[1]*Pd_220[2];
+	double P_000002020=Pd_002[1]*Pd_020[2];
+	double P_000002120=Pd_002[1]*Pd_120[2];
+	double P_000002220=Pd_002[1]*Pd_220[2];
+	double P_000102020=Pd_102[1]*Pd_020[2];
+	double P_000102120=Pd_102[1]*Pd_120[2];
+	double P_000102220=Pd_102[1]*Pd_220[2];
+	double P_000202020=Pd_202[1]*Pd_020[2];
+	double P_000202120=Pd_202[1]*Pd_120[2];
+	double P_000202220=Pd_202[1]*Pd_220[2];
+	double P_001000021=Pd_001[0]*Pd_021[2];
+	double P_001000121=Pd_001[0]*Pd_121[2];
+	double P_001000221=Pd_001[0]*Pd_221[2];
+	double P_001000321=Pd_001[0]*Pd_321[2];
+	double P_101000021=Pd_101[0]*Pd_021[2];
+	double P_101000121=Pd_101[0]*Pd_121[2];
+	double P_101000221=Pd_101[0]*Pd_221[2];
+	double P_101000321=Pd_101[0]*Pd_321[2];
+	double P_000001021=Pd_001[1]*Pd_021[2];
+	double P_000001121=Pd_001[1]*Pd_121[2];
+	double P_000001221=Pd_001[1]*Pd_221[2];
+	double P_000001321=Pd_001[1]*Pd_321[2];
+	double P_000101021=Pd_101[1]*Pd_021[2];
+	double P_000101121=Pd_101[1]*Pd_121[2];
+	double P_000101221=Pd_101[1]*Pd_221[2];
+	double P_000101321=Pd_101[1]*Pd_321[2];
+	double P_000000022=Pd_022[2];
+	double P_000000122=Pd_122[2];
+	double P_000000222=Pd_222[2];
+	double P_000000322=Pd_322[2];
+	double P_000000422=Pd_422[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_022000000*QR_000000000000+P_122000000*QR_000000000100+P_222000000*QR_000000000200+P_322000000*QR_000000000300+P_422000000*QR_000000000400);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_021001000*QR_000000000000+P_021101000*QR_000000000010+P_121001000*QR_000000000100+P_121101000*QR_000000000110+P_221001000*QR_000000000200+P_221101000*QR_000000000210+P_321001000*QR_000000000300+P_321101000*QR_000000000310);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020002000*QR_000000000000+P_020102000*QR_000000000010+P_020202000*QR_000000000020+P_120002000*QR_000000000100+P_120102000*QR_000000000110+P_120202000*QR_000000000120+P_220002000*QR_000000000200+P_220102000*QR_000000000210+P_220202000*QR_000000000220);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(P_021000001*QR_000000000000+P_021000101*QR_000000000001+P_121000001*QR_000000000100+P_121000101*QR_000000000101+P_221000001*QR_000000000200+P_221000101*QR_000000000201+P_321000001*QR_000000000300+P_321000101*QR_000000000301);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(P_020001001*QR_000000000000+P_020001101*QR_000000000001+P_020101001*QR_000000000010+P_020101101*QR_000000000011+P_120001001*QR_000000000100+P_120001101*QR_000000000101+P_120101001*QR_000000000110+P_120101101*QR_000000000111+P_220001001*QR_000000000200+P_220001101*QR_000000000201+P_220101001*QR_000000000210+P_220101101*QR_000000000211);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(P_020000002*QR_000000000000+P_020000102*QR_000000000001+P_020000202*QR_000000000002+P_120000002*QR_000000000100+P_120000102*QR_000000000101+P_120000202*QR_000000000102+P_220000002*QR_000000000200+P_220000102*QR_000000000201+P_220000202*QR_000000000202);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_012010000*QR_000000000000+P_012110000*QR_000000000010+P_112010000*QR_000000000100+P_112110000*QR_000000000110+P_212010000*QR_000000000200+P_212110000*QR_000000000210+P_312010000*QR_000000000300+P_312110000*QR_000000000310);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_011011000*QR_000000000000+P_011111000*QR_000000000010+P_011211000*QR_000000000020+P_111011000*QR_000000000100+P_111111000*QR_000000000110+P_111211000*QR_000000000120+P_211011000*QR_000000000200+P_211111000*QR_000000000210+P_211211000*QR_000000000220);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010012000*QR_000000000000+P_010112000*QR_000000000010+P_010212000*QR_000000000020+P_010312000*QR_000000000030+P_110012000*QR_000000000100+P_110112000*QR_000000000110+P_110212000*QR_000000000120+P_110312000*QR_000000000130);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(P_011010001*QR_000000000000+P_011010101*QR_000000000001+P_011110001*QR_000000000010+P_011110101*QR_000000000011+P_111010001*QR_000000000100+P_111010101*QR_000000000101+P_111110001*QR_000000000110+P_111110101*QR_000000000111+P_211010001*QR_000000000200+P_211010101*QR_000000000201+P_211110001*QR_000000000210+P_211110101*QR_000000000211);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(P_010011001*QR_000000000000+P_010011101*QR_000000000001+P_010111001*QR_000000000010+P_010111101*QR_000000000011+P_010211001*QR_000000000020+P_010211101*QR_000000000021+P_110011001*QR_000000000100+P_110011101*QR_000000000101+P_110111001*QR_000000000110+P_110111101*QR_000000000111+P_110211001*QR_000000000120+P_110211101*QR_000000000121);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(P_010010002*QR_000000000000+P_010010102*QR_000000000001+P_010010202*QR_000000000002+P_010110002*QR_000000000010+P_010110102*QR_000000000011+P_010110202*QR_000000000012+P_110010002*QR_000000000100+P_110010102*QR_000000000101+P_110010202*QR_000000000102+P_110110002*QR_000000000110+P_110110102*QR_000000000111+P_110110202*QR_000000000112);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_002020000*QR_000000000000+P_002120000*QR_000000000010+P_002220000*QR_000000000020+P_102020000*QR_000000000100+P_102120000*QR_000000000110+P_102220000*QR_000000000120+P_202020000*QR_000000000200+P_202120000*QR_000000000210+P_202220000*QR_000000000220);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_001021000*QR_000000000000+P_001121000*QR_000000000010+P_001221000*QR_000000000020+P_001321000*QR_000000000030+P_101021000*QR_000000000100+P_101121000*QR_000000000110+P_101221000*QR_000000000120+P_101321000*QR_000000000130);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000022000*QR_000000000000+P_000122000*QR_000000000010+P_000222000*QR_000000000020+P_000322000*QR_000000000030+P_000422000*QR_000000000040);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(P_001020001*QR_000000000000+P_001020101*QR_000000000001+P_001120001*QR_000000000010+P_001120101*QR_000000000011+P_001220001*QR_000000000020+P_001220101*QR_000000000021+P_101020001*QR_000000000100+P_101020101*QR_000000000101+P_101120001*QR_000000000110+P_101120101*QR_000000000111+P_101220001*QR_000000000120+P_101220101*QR_000000000121);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(P_000021001*QR_000000000000+P_000021101*QR_000000000001+P_000121001*QR_000000000010+P_000121101*QR_000000000011+P_000221001*QR_000000000020+P_000221101*QR_000000000021+P_000321001*QR_000000000030+P_000321101*QR_000000000031);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(P_000020002*QR_000000000000+P_000020102*QR_000000000001+P_000020202*QR_000000000002+P_000120002*QR_000000000010+P_000120102*QR_000000000011+P_000120202*QR_000000000012+P_000220002*QR_000000000020+P_000220102*QR_000000000021+P_000220202*QR_000000000022);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_012000010*QR_000000000000+P_012000110*QR_000000000001+P_112000010*QR_000000000100+P_112000110*QR_000000000101+P_212000010*QR_000000000200+P_212000110*QR_000000000201+P_312000010*QR_000000000300+P_312000110*QR_000000000301);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_011001010*QR_000000000000+P_011001110*QR_000000000001+P_011101010*QR_000000000010+P_011101110*QR_000000000011+P_111001010*QR_000000000100+P_111001110*QR_000000000101+P_111101010*QR_000000000110+P_111101110*QR_000000000111+P_211001010*QR_000000000200+P_211001110*QR_000000000201+P_211101010*QR_000000000210+P_211101110*QR_000000000211);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010002010*QR_000000000000+P_010002110*QR_000000000001+P_010102010*QR_000000000010+P_010102110*QR_000000000011+P_010202010*QR_000000000020+P_010202110*QR_000000000021+P_110002010*QR_000000000100+P_110002110*QR_000000000101+P_110102010*QR_000000000110+P_110102110*QR_000000000111+P_110202010*QR_000000000120+P_110202110*QR_000000000121);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(P_011000011*QR_000000000000+P_011000111*QR_000000000001+P_011000211*QR_000000000002+P_111000011*QR_000000000100+P_111000111*QR_000000000101+P_111000211*QR_000000000102+P_211000011*QR_000000000200+P_211000111*QR_000000000201+P_211000211*QR_000000000202);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(P_010001011*QR_000000000000+P_010001111*QR_000000000001+P_010001211*QR_000000000002+P_010101011*QR_000000000010+P_010101111*QR_000000000011+P_010101211*QR_000000000012+P_110001011*QR_000000000100+P_110001111*QR_000000000101+P_110001211*QR_000000000102+P_110101011*QR_000000000110+P_110101111*QR_000000000111+P_110101211*QR_000000000112);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(P_010000012*QR_000000000000+P_010000112*QR_000000000001+P_010000212*QR_000000000002+P_010000312*QR_000000000003+P_110000012*QR_000000000100+P_110000112*QR_000000000101+P_110000212*QR_000000000102+P_110000312*QR_000000000103);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_002010010*QR_000000000000+P_002010110*QR_000000000001+P_002110010*QR_000000000010+P_002110110*QR_000000000011+P_102010010*QR_000000000100+P_102010110*QR_000000000101+P_102110010*QR_000000000110+P_102110110*QR_000000000111+P_202010010*QR_000000000200+P_202010110*QR_000000000201+P_202110010*QR_000000000210+P_202110110*QR_000000000211);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_001011010*QR_000000000000+P_001011110*QR_000000000001+P_001111010*QR_000000000010+P_001111110*QR_000000000011+P_001211010*QR_000000000020+P_001211110*QR_000000000021+P_101011010*QR_000000000100+P_101011110*QR_000000000101+P_101111010*QR_000000000110+P_101111110*QR_000000000111+P_101211010*QR_000000000120+P_101211110*QR_000000000121);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000012010*QR_000000000000+P_000012110*QR_000000000001+P_000112010*QR_000000000010+P_000112110*QR_000000000011+P_000212010*QR_000000000020+P_000212110*QR_000000000021+P_000312010*QR_000000000030+P_000312110*QR_000000000031);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(P_001010011*QR_000000000000+P_001010111*QR_000000000001+P_001010211*QR_000000000002+P_001110011*QR_000000000010+P_001110111*QR_000000000011+P_001110211*QR_000000000012+P_101010011*QR_000000000100+P_101010111*QR_000000000101+P_101010211*QR_000000000102+P_101110011*QR_000000000110+P_101110111*QR_000000000111+P_101110211*QR_000000000112);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(P_000011011*QR_000000000000+P_000011111*QR_000000000001+P_000011211*QR_000000000002+P_000111011*QR_000000000010+P_000111111*QR_000000000011+P_000111211*QR_000000000012+P_000211011*QR_000000000020+P_000211111*QR_000000000021+P_000211211*QR_000000000022);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(P_000010012*QR_000000000000+P_000010112*QR_000000000001+P_000010212*QR_000000000002+P_000010312*QR_000000000003+P_000110012*QR_000000000010+P_000110112*QR_000000000011+P_000110212*QR_000000000012+P_000110312*QR_000000000013);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_002000020*QR_000000000000+P_002000120*QR_000000000001+P_002000220*QR_000000000002+P_102000020*QR_000000000100+P_102000120*QR_000000000101+P_102000220*QR_000000000102+P_202000020*QR_000000000200+P_202000120*QR_000000000201+P_202000220*QR_000000000202);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_001001020*QR_000000000000+P_001001120*QR_000000000001+P_001001220*QR_000000000002+P_001101020*QR_000000000010+P_001101120*QR_000000000011+P_001101220*QR_000000000012+P_101001020*QR_000000000100+P_101001120*QR_000000000101+P_101001220*QR_000000000102+P_101101020*QR_000000000110+P_101101120*QR_000000000111+P_101101220*QR_000000000112);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000002020*QR_000000000000+P_000002120*QR_000000000001+P_000002220*QR_000000000002+P_000102020*QR_000000000010+P_000102120*QR_000000000011+P_000102220*QR_000000000012+P_000202020*QR_000000000020+P_000202120*QR_000000000021+P_000202220*QR_000000000022);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(P_001000021*QR_000000000000+P_001000121*QR_000000000001+P_001000221*QR_000000000002+P_001000321*QR_000000000003+P_101000021*QR_000000000100+P_101000121*QR_000000000101+P_101000221*QR_000000000102+P_101000321*QR_000000000103);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(P_000001021*QR_000000000000+P_000001121*QR_000000000001+P_000001221*QR_000000000002+P_000001321*QR_000000000003+P_000101021*QR_000000000010+P_000101121*QR_000000000011+P_000101221*QR_000000000012+P_000101321*QR_000000000013);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(P_000000022*QR_000000000000+P_000000122*QR_000000000001+P_000000222*QR_000000000002+P_000000322*QR_000000000003+P_000000422*QR_000000000004);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ddss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            Pd_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            Pd_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            Pd_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double Pd_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            Pd_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            Pd_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            Pd_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		double Pd_022[3];
+		double Pd_122[3];
+		double Pd_222[3];
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=Pd_001[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=2*aPin2+Pd_001[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=Pd_001[i]*aPin2+aPin1*Pd_111[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=Pd_010[i]*aPin1+aPin1*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=2*aPin2+Pd_010[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=Pd_010[i]*aPin2+aPin1*Pd_111[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_022[i]=Pd_112[i]+Pd_010[i]*Pd_012[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_122[i]=2*Pd_212[i]+Pd_010[i]*Pd_112[i]+aPin1*Pd_012[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_222[i]=3*aPin3+Pd_010[i]*Pd_212[i]+aPin1*Pd_112[i];
+			}
+			double P_022000000;
+			double P_122000000;
+			double P_222000000;
+			double P_021001000;
+			double P_121001000;
+			double P_221001000;
+			double P_020002000;
+			double P_021000001;
+			double P_121000001;
+			double P_221000001;
+			double P_020001001;
+			double P_020000002;
+			double P_012010000;
+			double P_112010000;
+			double P_212010000;
+			double P_011011000;
+			double P_011111000;
+			double P_111011000;
+			double P_111111000;
+			double P_010012000;
+			double P_010112000;
+			double P_010212000;
+			double P_011010001;
+			double P_111010001;
+			double P_010011001;
+			double P_010111001;
+			double P_010010002;
+			double P_002020000;
+			double P_001021000;
+			double P_001121000;
+			double P_001221000;
+			double P_000022000;
+			double P_000122000;
+			double P_000222000;
+			double P_001020001;
+			double P_000021001;
+			double P_000121001;
+			double P_000221001;
+			double P_000020002;
+			double P_012000010;
+			double P_112000010;
+			double P_212000010;
+			double P_011001010;
+			double P_111001010;
+			double P_010002010;
+			double P_011000011;
+			double P_011000111;
+			double P_111000011;
+			double P_111000111;
+			double P_010001011;
+			double P_010001111;
+			double P_010000012;
+			double P_010000112;
+			double P_010000212;
+			double P_002010010;
+			double P_001011010;
+			double P_001111010;
+			double P_000012010;
+			double P_000112010;
+			double P_000212010;
+			double P_001010011;
+			double P_001010111;
+			double P_000011011;
+			double P_000011111;
+			double P_000111011;
+			double P_000111111;
+			double P_000010012;
+			double P_000010112;
+			double P_000010212;
+			double P_002000020;
+			double P_001001020;
+			double P_000002020;
+			double P_001000021;
+			double P_001000121;
+			double P_001000221;
+			double P_000001021;
+			double P_000001121;
+			double P_000001221;
+			double P_000000022;
+			double P_000000122;
+			double P_000000222;
+			double a2P_111000000_1;
+			double a2P_111000000_2;
+			double a1P_021000000_1;
+			double a1P_121000000_1;
+			double a1P_221000000_1;
+			double a3P_000001000_1;
+			double a3P_000001000_2;
+			double a1P_020001000_1;
+			double a1P_020001000_2;
+			double a2P_020000000_1;
+			double a1P_010002000_1;
+			double a1P_010002000_2;
+			double a2P_010001000_1;
+			double a2P_010001000_4;
+			double a2P_010001000_2;
+			double a3P_010000000_1;
+			double a3P_010000000_2;
+			double a2P_000002000_1;
+			double a3P_000000001_1;
+			double a3P_000000001_2;
+			double a1P_020000001_1;
+			double a1P_020000001_2;
+			double a1P_010001001_1;
+			double a1P_010001001_2;
+			double a2P_010000001_1;
+			double a2P_010000001_2;
+			double a2P_010000001_4;
+			double a2P_000001001_1;
+			double a1P_010000002_1;
+			double a1P_010000002_2;
+			double a2P_000000002_1;
+			double a1P_012000000_1;
+			double a1P_112000000_1;
+			double a1P_212000000_1;
+			double a3P_000010000_1;
+			double a3P_000010000_2;
+			double a2P_011000000_1;
+			double a2P_000011000_1;
+			double a2P_000111000_1;
+			double a2P_000111000_2;
+			double a1P_000012000_1;
+			double a1P_000112000_1;
+			double a1P_000212000_1;
+			double a1P_011010000_1;
+			double a1P_011000001_1;
+			double a1P_111010000_1;
+			double a1P_111000001_1;
+			double a2P_000010001_1;
+			double a2P_000010001_2;
+			double a2P_000010001_4;
+			double a1P_010011000_1;
+			double a1P_010111000_1;
+			double a1P_000011001_1;
+			double a1P_000111001_1;
+			double a1P_010010001_1;
+			double a1P_010010001_2;
+			double a2P_010010000_1;
+			double a1P_000010002_1;
+			double a1P_000010002_2;
+			double a1P_002010000_1;
+			double a1P_002010000_2;
+			double a2P_002000000_1;
+			double a1P_001020000_1;
+			double a1P_001020000_2;
+			double a2P_001010000_1;
+			double a2P_001010000_4;
+			double a2P_001010000_2;
+			double a3P_001000000_1;
+			double a3P_001000000_2;
+			double a2P_000020000_1;
+			double a1P_000021000_1;
+			double a1P_000121000_1;
+			double a1P_000221000_1;
+			double a1P_001010001_1;
+			double a1P_001010001_2;
+			double a2P_001000001_1;
+			double a1P_000020001_1;
+			double a1P_000020001_2;
+			double a3P_000000010_1;
+			double a3P_000000010_2;
+			double a1P_011001000_1;
+			double a1P_011000010_1;
+			double a1P_111001000_1;
+			double a1P_111000010_1;
+			double a2P_000001010_1;
+			double a2P_000001010_2;
+			double a2P_000001010_4;
+			double a1P_010001010_1;
+			double a1P_010001010_2;
+			double a2P_010000010_1;
+			double a1P_000002010_1;
+			double a1P_000002010_2;
+			double a2P_000000011_1;
+			double a2P_000000111_1;
+			double a2P_000000111_2;
+			double a1P_010000011_1;
+			double a1P_010000111_1;
+			double a1P_000001011_1;
+			double a1P_000001111_1;
+			double a1P_000000012_1;
+			double a1P_000000112_1;
+			double a1P_000000212_1;
+			double a1P_002000010_1;
+			double a1P_002000010_2;
+			double a1P_001010010_1;
+			double a1P_001010010_2;
+			double a2P_001000010_1;
+			double a2P_001000010_2;
+			double a2P_001000010_4;
+			double a2P_000010010_1;
+			double a1P_001011000_1;
+			double a1P_001111000_1;
+			double a1P_000011010_1;
+			double a1P_000111010_1;
+			double a1P_001000011_1;
+			double a1P_001000111_1;
+			double a1P_000010011_1;
+			double a1P_000010111_1;
+			double a1P_001000020_1;
+			double a1P_001000020_2;
+			double a2P_000000020_1;
+			double a1P_001001010_1;
+			double a1P_001001010_2;
+			double a2P_001001000_1;
+			double a1P_000001020_1;
+			double a1P_000001020_2;
+			double a1P_000000021_1;
+			double a1P_000000121_1;
+			double a1P_000000221_1;
+			P_022000000=Pd_022[0];
+			P_122000000=Pd_122[0];
+			P_222000000=Pd_222[0];
+			P_021001000=Pd_021[0]*Pd_001[1];
+			P_121001000=Pd_121[0]*Pd_001[1];
+			P_221001000=Pd_221[0]*Pd_001[1];
+			P_020002000=Pd_020[0]*Pd_002[1];
+			P_021000001=Pd_021[0]*Pd_001[2];
+			P_121000001=Pd_121[0]*Pd_001[2];
+			P_221000001=Pd_221[0]*Pd_001[2];
+			P_020001001=Pd_020[0]*Pd_001[1]*Pd_001[2];
+			P_020000002=Pd_020[0]*Pd_002[2];
+			P_012010000=Pd_012[0]*Pd_010[1];
+			P_112010000=Pd_112[0]*Pd_010[1];
+			P_212010000=Pd_212[0]*Pd_010[1];
+			P_011011000=Pd_011[0]*Pd_011[1];
+			P_011111000=Pd_011[0]*Pd_111[1];
+			P_111011000=Pd_111[0]*Pd_011[1];
+			P_111111000=Pd_111[0]*Pd_111[1];
+			P_010012000=Pd_010[0]*Pd_012[1];
+			P_010112000=Pd_010[0]*Pd_112[1];
+			P_010212000=Pd_010[0]*Pd_212[1];
+			P_011010001=Pd_011[0]*Pd_010[1]*Pd_001[2];
+			P_111010001=Pd_111[0]*Pd_010[1]*Pd_001[2];
+			P_010011001=Pd_010[0]*Pd_011[1]*Pd_001[2];
+			P_010111001=Pd_010[0]*Pd_111[1]*Pd_001[2];
+			P_010010002=Pd_010[0]*Pd_010[1]*Pd_002[2];
+			P_002020000=Pd_002[0]*Pd_020[1];
+			P_001021000=Pd_001[0]*Pd_021[1];
+			P_001121000=Pd_001[0]*Pd_121[1];
+			P_001221000=Pd_001[0]*Pd_221[1];
+			P_000022000=Pd_022[1];
+			P_000122000=Pd_122[1];
+			P_000222000=Pd_222[1];
+			P_001020001=Pd_001[0]*Pd_020[1]*Pd_001[2];
+			P_000021001=Pd_021[1]*Pd_001[2];
+			P_000121001=Pd_121[1]*Pd_001[2];
+			P_000221001=Pd_221[1]*Pd_001[2];
+			P_000020002=Pd_020[1]*Pd_002[2];
+			P_012000010=Pd_012[0]*Pd_010[2];
+			P_112000010=Pd_112[0]*Pd_010[2];
+			P_212000010=Pd_212[0]*Pd_010[2];
+			P_011001010=Pd_011[0]*Pd_001[1]*Pd_010[2];
+			P_111001010=Pd_111[0]*Pd_001[1]*Pd_010[2];
+			P_010002010=Pd_010[0]*Pd_002[1]*Pd_010[2];
+			P_011000011=Pd_011[0]*Pd_011[2];
+			P_011000111=Pd_011[0]*Pd_111[2];
+			P_111000011=Pd_111[0]*Pd_011[2];
+			P_111000111=Pd_111[0]*Pd_111[2];
+			P_010001011=Pd_010[0]*Pd_001[1]*Pd_011[2];
+			P_010001111=Pd_010[0]*Pd_001[1]*Pd_111[2];
+			P_010000012=Pd_010[0]*Pd_012[2];
+			P_010000112=Pd_010[0]*Pd_112[2];
+			P_010000212=Pd_010[0]*Pd_212[2];
+			P_002010010=Pd_002[0]*Pd_010[1]*Pd_010[2];
+			P_001011010=Pd_001[0]*Pd_011[1]*Pd_010[2];
+			P_001111010=Pd_001[0]*Pd_111[1]*Pd_010[2];
+			P_000012010=Pd_012[1]*Pd_010[2];
+			P_000112010=Pd_112[1]*Pd_010[2];
+			P_000212010=Pd_212[1]*Pd_010[2];
+			P_001010011=Pd_001[0]*Pd_010[1]*Pd_011[2];
+			P_001010111=Pd_001[0]*Pd_010[1]*Pd_111[2];
+			P_000011011=Pd_011[1]*Pd_011[2];
+			P_000011111=Pd_011[1]*Pd_111[2];
+			P_000111011=Pd_111[1]*Pd_011[2];
+			P_000111111=Pd_111[1]*Pd_111[2];
+			P_000010012=Pd_010[1]*Pd_012[2];
+			P_000010112=Pd_010[1]*Pd_112[2];
+			P_000010212=Pd_010[1]*Pd_212[2];
+			P_002000020=Pd_002[0]*Pd_020[2];
+			P_001001020=Pd_001[0]*Pd_001[1]*Pd_020[2];
+			P_000002020=Pd_002[1]*Pd_020[2];
+			P_001000021=Pd_001[0]*Pd_021[2];
+			P_001000121=Pd_001[0]*Pd_121[2];
+			P_001000221=Pd_001[0]*Pd_221[2];
+			P_000001021=Pd_001[1]*Pd_021[2];
+			P_000001121=Pd_001[1]*Pd_121[2];
+			P_000001221=Pd_001[1]*Pd_221[2];
+			P_000000022=Pd_022[2];
+			P_000000122=Pd_122[2];
+			P_000000222=Pd_222[2];
+			a2P_111000000_1=Pd_111[0];
+			a2P_111000000_2=2*a2P_111000000_1;
+			a1P_021000000_1=Pd_021[0];
+			a1P_121000000_1=Pd_121[0];
+			a1P_221000000_1=Pd_221[0];
+			a3P_000001000_1=Pd_001[1];
+			a3P_000001000_2=2*a3P_000001000_1;
+			a1P_020001000_1=Pd_020[0]*Pd_001[1];
+			a1P_020001000_2=2*a1P_020001000_1;
+			a2P_020000000_1=Pd_020[0];
+			a1P_010002000_1=Pd_010[0]*Pd_002[1];
+			a1P_010002000_2=2*a1P_010002000_1;
+			a2P_010001000_1=Pd_010[0]*Pd_001[1];
+			a2P_010001000_4=4*a2P_010001000_1;
+			a2P_010001000_2=2*a2P_010001000_1;
+			a3P_010000000_1=Pd_010[0];
+			a3P_010000000_2=2*a3P_010000000_1;
+			a2P_000002000_1=Pd_002[1];
+			a3P_000000001_1=Pd_001[2];
+			a3P_000000001_2=2*a3P_000000001_1;
+			a1P_020000001_1=Pd_020[0]*Pd_001[2];
+			a1P_020000001_2=2*a1P_020000001_1;
+			a1P_010001001_1=Pd_010[0]*Pd_001[1]*Pd_001[2];
+			a1P_010001001_2=2*a1P_010001001_1;
+			a2P_010000001_1=Pd_010[0]*Pd_001[2];
+			a2P_010000001_2=2*a2P_010000001_1;
+			a2P_010000001_4=4*a2P_010000001_1;
+			a2P_000001001_1=Pd_001[1]*Pd_001[2];
+			a1P_010000002_1=Pd_010[0]*Pd_002[2];
+			a1P_010000002_2=2*a1P_010000002_1;
+			a2P_000000002_1=Pd_002[2];
+			a1P_012000000_1=Pd_012[0];
+			a1P_112000000_1=Pd_112[0];
+			a1P_212000000_1=Pd_212[0];
+			a3P_000010000_1=Pd_010[1];
+			a3P_000010000_2=2*a3P_000010000_1;
+			a2P_011000000_1=Pd_011[0];
+			a2P_000011000_1=Pd_011[1];
+			a2P_000111000_1=Pd_111[1];
+			a2P_000111000_2=2*a2P_000111000_1;
+			a1P_000012000_1=Pd_012[1];
+			a1P_000112000_1=Pd_112[1];
+			a1P_000212000_1=Pd_212[1];
+			a1P_011010000_1=Pd_011[0]*Pd_010[1];
+			a1P_011000001_1=Pd_011[0]*Pd_001[2];
+			a1P_111010000_1=Pd_111[0]*Pd_010[1];
+			a1P_111000001_1=Pd_111[0]*Pd_001[2];
+			a2P_000010001_1=Pd_010[1]*Pd_001[2];
+			a2P_000010001_2=2*a2P_000010001_1;
+			a2P_000010001_4=4*a2P_000010001_1;
+			a1P_010011000_1=Pd_010[0]*Pd_011[1];
+			a1P_010111000_1=Pd_010[0]*Pd_111[1];
+			a1P_000011001_1=Pd_011[1]*Pd_001[2];
+			a1P_000111001_1=Pd_111[1]*Pd_001[2];
+			a1P_010010001_1=Pd_010[0]*Pd_010[1]*Pd_001[2];
+			a1P_010010001_2=2*a1P_010010001_1;
+			a2P_010010000_1=Pd_010[0]*Pd_010[1];
+			a1P_000010002_1=Pd_010[1]*Pd_002[2];
+			a1P_000010002_2=2*a1P_000010002_1;
+			a1P_002010000_1=Pd_002[0]*Pd_010[1];
+			a1P_002010000_2=2*a1P_002010000_1;
+			a2P_002000000_1=Pd_002[0];
+			a1P_001020000_1=Pd_001[0]*Pd_020[1];
+			a1P_001020000_2=2*a1P_001020000_1;
+			a2P_001010000_1=Pd_001[0]*Pd_010[1];
+			a2P_001010000_4=4*a2P_001010000_1;
+			a2P_001010000_2=2*a2P_001010000_1;
+			a3P_001000000_1=Pd_001[0];
+			a3P_001000000_2=2*a3P_001000000_1;
+			a2P_000020000_1=Pd_020[1];
+			a1P_000021000_1=Pd_021[1];
+			a1P_000121000_1=Pd_121[1];
+			a1P_000221000_1=Pd_221[1];
+			a1P_001010001_1=Pd_001[0]*Pd_010[1]*Pd_001[2];
+			a1P_001010001_2=2*a1P_001010001_1;
+			a2P_001000001_1=Pd_001[0]*Pd_001[2];
+			a1P_000020001_1=Pd_020[1]*Pd_001[2];
+			a1P_000020001_2=2*a1P_000020001_1;
+			a3P_000000010_1=Pd_010[2];
+			a3P_000000010_2=2*a3P_000000010_1;
+			a1P_011001000_1=Pd_011[0]*Pd_001[1];
+			a1P_011000010_1=Pd_011[0]*Pd_010[2];
+			a1P_111001000_1=Pd_111[0]*Pd_001[1];
+			a1P_111000010_1=Pd_111[0]*Pd_010[2];
+			a2P_000001010_1=Pd_001[1]*Pd_010[2];
+			a2P_000001010_2=2*a2P_000001010_1;
+			a2P_000001010_4=4*a2P_000001010_1;
+			a1P_010001010_1=Pd_010[0]*Pd_001[1]*Pd_010[2];
+			a1P_010001010_2=2*a1P_010001010_1;
+			a2P_010000010_1=Pd_010[0]*Pd_010[2];
+			a1P_000002010_1=Pd_002[1]*Pd_010[2];
+			a1P_000002010_2=2*a1P_000002010_1;
+			a2P_000000011_1=Pd_011[2];
+			a2P_000000111_1=Pd_111[2];
+			a2P_000000111_2=2*a2P_000000111_1;
+			a1P_010000011_1=Pd_010[0]*Pd_011[2];
+			a1P_010000111_1=Pd_010[0]*Pd_111[2];
+			a1P_000001011_1=Pd_001[1]*Pd_011[2];
+			a1P_000001111_1=Pd_001[1]*Pd_111[2];
+			a1P_000000012_1=Pd_012[2];
+			a1P_000000112_1=Pd_112[2];
+			a1P_000000212_1=Pd_212[2];
+			a1P_002000010_1=Pd_002[0]*Pd_010[2];
+			a1P_002000010_2=2*a1P_002000010_1;
+			a1P_001010010_1=Pd_001[0]*Pd_010[1]*Pd_010[2];
+			a1P_001010010_2=2*a1P_001010010_1;
+			a2P_001000010_1=Pd_001[0]*Pd_010[2];
+			a2P_001000010_2=2*a2P_001000010_1;
+			a2P_001000010_4=4*a2P_001000010_1;
+			a2P_000010010_1=Pd_010[1]*Pd_010[2];
+			a1P_001011000_1=Pd_001[0]*Pd_011[1];
+			a1P_001111000_1=Pd_001[0]*Pd_111[1];
+			a1P_000011010_1=Pd_011[1]*Pd_010[2];
+			a1P_000111010_1=Pd_111[1]*Pd_010[2];
+			a1P_001000011_1=Pd_001[0]*Pd_011[2];
+			a1P_001000111_1=Pd_001[0]*Pd_111[2];
+			a1P_000010011_1=Pd_010[1]*Pd_011[2];
+			a1P_000010111_1=Pd_010[1]*Pd_111[2];
+			a1P_001000020_1=Pd_001[0]*Pd_020[2];
+			a1P_001000020_2=2*a1P_001000020_1;
+			a2P_000000020_1=Pd_020[2];
+			a1P_001001010_1=Pd_001[0]*Pd_001[1]*Pd_010[2];
+			a1P_001001010_2=2*a1P_001001010_1;
+			a2P_001001000_1=Pd_001[0]*Pd_001[1];
+			a1P_000001020_1=Pd_001[1]*Pd_020[2];
+			a1P_000001020_2=2*a1P_000001020_1;
+			a1P_000000021_1=Pd_021[2];
+			a1P_000000121_1=Pd_121[2];
+			a1P_000000221_1=Pd_221[2];
+			double PR_022000000000=P_022000000*R_000[0]+P_122000000*R_100[0]+P_222000000*R_200[0]+a2P_111000000_2*R_300[0]+aPin4*R_400[0];
+			double PR_021001000000=P_021001000*R_000[0]+a1P_021000000_1*R_010[0]+P_121001000*R_100[0]+a1P_121000000_1*R_110[0]+P_221001000*R_200[0]+a1P_221000000_1*R_210[0]+a3P_000001000_1*R_300[0]+aPin4*R_310[0];
+			double PR_020002000000=P_020002000*R_000[0]+a1P_020001000_2*R_010[0]+a2P_020000000_1*R_020[0]+a1P_010002000_2*R_100[0]+a2P_010001000_4*R_110[0]+a3P_010000000_2*R_120[0]+a2P_000002000_1*R_200[0]+a3P_000001000_2*R_210[0]+aPin4*R_220[0];
+			double PR_021000001000=P_021000001*R_000[0]+a1P_021000000_1*R_001[0]+P_121000001*R_100[0]+a1P_121000000_1*R_101[0]+P_221000001*R_200[0]+a1P_221000000_1*R_201[0]+a3P_000000001_1*R_300[0]+aPin4*R_301[0];
+			double PR_020001001000=P_020001001*R_000[0]+a1P_020001000_1*R_001[0]+a1P_020000001_1*R_010[0]+a2P_020000000_1*R_011[0]+a1P_010001001_2*R_100[0]+a2P_010001000_2*R_101[0]+a2P_010000001_2*R_110[0]+a3P_010000000_2*R_111[0]+a2P_000001001_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000001_1*R_210[0]+aPin4*R_211[0];
+			double PR_020000002000=P_020000002*R_000[0]+a1P_020000001_2*R_001[0]+a2P_020000000_1*R_002[0]+a1P_010000002_2*R_100[0]+a2P_010000001_4*R_101[0]+a3P_010000000_2*R_102[0]+a2P_000000002_1*R_200[0]+a3P_000000001_2*R_201[0]+aPin4*R_202[0];
+			double PR_012010000000=P_012010000*R_000[0]+a1P_012000000_1*R_010[0]+P_112010000*R_100[0]+a1P_112000000_1*R_110[0]+P_212010000*R_200[0]+a1P_212000000_1*R_210[0]+a3P_000010000_1*R_300[0]+aPin4*R_310[0];
+			double PR_011011000000=P_011011000*R_000[0]+P_011111000*R_010[0]+a2P_011000000_1*R_020[0]+P_111011000*R_100[0]+P_111111000*R_110[0]+a2P_111000000_1*R_120[0]+a2P_000011000_1*R_200[0]+a2P_000111000_1*R_210[0]+aPin4*R_220[0];
+			double PR_010012000000=P_010012000*R_000[0]+P_010112000*R_010[0]+P_010212000*R_020[0]+a3P_010000000_1*R_030[0]+a1P_000012000_1*R_100[0]+a1P_000112000_1*R_110[0]+a1P_000212000_1*R_120[0]+aPin4*R_130[0];
+			double PR_011010001000=P_011010001*R_000[0]+a1P_011010000_1*R_001[0]+a1P_011000001_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111010001*R_100[0]+a1P_111010000_1*R_101[0]+a1P_111000001_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000010001_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000001_1*R_210[0]+aPin4*R_211[0];
+			double PR_010011001000=P_010011001*R_000[0]+a1P_010011000_1*R_001[0]+P_010111001*R_010[0]+a1P_010111000_1*R_011[0]+a2P_010000001_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000011001_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111001_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000001_1*R_120[0]+aPin4*R_121[0];
+			double PR_010010002000=P_010010002*R_000[0]+a1P_010010001_2*R_001[0]+a2P_010010000_1*R_002[0]+a1P_010000002_1*R_010[0]+a2P_010000001_2*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000010002_1*R_100[0]+a2P_000010001_2*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000002_1*R_110[0]+a3P_000000001_2*R_111[0]+aPin4*R_112[0];
+			double PR_002020000000=P_002020000*R_000[0]+a1P_002010000_2*R_010[0]+a2P_002000000_1*R_020[0]+a1P_001020000_2*R_100[0]+a2P_001010000_4*R_110[0]+a3P_001000000_2*R_120[0]+a2P_000020000_1*R_200[0]+a3P_000010000_2*R_210[0]+aPin4*R_220[0];
+			double PR_001021000000=P_001021000*R_000[0]+P_001121000*R_010[0]+P_001221000*R_020[0]+a3P_001000000_1*R_030[0]+a1P_000021000_1*R_100[0]+a1P_000121000_1*R_110[0]+a1P_000221000_1*R_120[0]+aPin4*R_130[0];
+			double PR_000022000000=P_000022000*R_000[0]+P_000122000*R_010[0]+P_000222000*R_020[0]+a2P_000111000_2*R_030[0]+aPin4*R_040[0];
+			double PR_001020001000=P_001020001*R_000[0]+a1P_001020000_1*R_001[0]+a1P_001010001_2*R_010[0]+a2P_001010000_2*R_011[0]+a2P_001000001_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000020001_1*R_100[0]+a2P_000020000_1*R_101[0]+a2P_000010001_2*R_110[0]+a3P_000010000_2*R_111[0]+a3P_000000001_1*R_120[0]+aPin4*R_121[0];
+			double PR_000021001000=P_000021001*R_000[0]+a1P_000021000_1*R_001[0]+P_000121001*R_010[0]+a1P_000121000_1*R_011[0]+P_000221001*R_020[0]+a1P_000221000_1*R_021[0]+a3P_000000001_1*R_030[0]+aPin4*R_031[0];
+			double PR_000020002000=P_000020002*R_000[0]+a1P_000020001_2*R_001[0]+a2P_000020000_1*R_002[0]+a1P_000010002_2*R_010[0]+a2P_000010001_4*R_011[0]+a3P_000010000_2*R_012[0]+a2P_000000002_1*R_020[0]+a3P_000000001_2*R_021[0]+aPin4*R_022[0];
+			double PR_012000010000=P_012000010*R_000[0]+a1P_012000000_1*R_001[0]+P_112000010*R_100[0]+a1P_112000000_1*R_101[0]+P_212000010*R_200[0]+a1P_212000000_1*R_201[0]+a3P_000000010_1*R_300[0]+aPin4*R_301[0];
+			double PR_011001010000=P_011001010*R_000[0]+a1P_011001000_1*R_001[0]+a1P_011000010_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111001010*R_100[0]+a1P_111001000_1*R_101[0]+a1P_111000010_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000001010_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000010_1*R_210[0]+aPin4*R_211[0];
+			double PR_010002010000=P_010002010*R_000[0]+a1P_010002000_1*R_001[0]+a1P_010001010_2*R_010[0]+a2P_010001000_2*R_011[0]+a2P_010000010_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000002010_1*R_100[0]+a2P_000002000_1*R_101[0]+a2P_000001010_2*R_110[0]+a3P_000001000_2*R_111[0]+a3P_000000010_1*R_120[0]+aPin4*R_121[0];
+			double PR_011000011000=P_011000011*R_000[0]+P_011000111*R_001[0]+a2P_011000000_1*R_002[0]+P_111000011*R_100[0]+P_111000111*R_101[0]+a2P_111000000_1*R_102[0]+a2P_000000011_1*R_200[0]+a2P_000000111_1*R_201[0]+aPin4*R_202[0];
+			double PR_010001011000=P_010001011*R_000[0]+P_010001111*R_001[0]+a2P_010001000_1*R_002[0]+a1P_010000011_1*R_010[0]+a1P_010000111_1*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000001011_1*R_100[0]+a1P_000001111_1*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+aPin4*R_112[0];
+			double PR_010000012000=P_010000012*R_000[0]+P_010000112*R_001[0]+P_010000212*R_002[0]+a3P_010000000_1*R_003[0]+a1P_000000012_1*R_100[0]+a1P_000000112_1*R_101[0]+a1P_000000212_1*R_102[0]+aPin4*R_103[0];
+			double PR_002010010000=P_002010010*R_000[0]+a1P_002010000_1*R_001[0]+a1P_002000010_1*R_010[0]+a2P_002000000_1*R_011[0]+a1P_001010010_2*R_100[0]+a2P_001010000_2*R_101[0]+a2P_001000010_2*R_110[0]+a3P_001000000_2*R_111[0]+a2P_000010010_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000010_1*R_210[0]+aPin4*R_211[0];
+			double PR_001011010000=P_001011010*R_000[0]+a1P_001011000_1*R_001[0]+P_001111010*R_010[0]+a1P_001111000_1*R_011[0]+a2P_001000010_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000011010_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111010_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000010_1*R_120[0]+aPin4*R_121[0];
+			double PR_000012010000=P_000012010*R_000[0]+a1P_000012000_1*R_001[0]+P_000112010*R_010[0]+a1P_000112000_1*R_011[0]+P_000212010*R_020[0]+a1P_000212000_1*R_021[0]+a3P_000000010_1*R_030[0]+aPin4*R_031[0];
+			double PR_001010011000=P_001010011*R_000[0]+P_001010111*R_001[0]+a2P_001010000_1*R_002[0]+a1P_001000011_1*R_010[0]+a1P_001000111_1*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000010011_1*R_100[0]+a1P_000010111_1*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+aPin4*R_112[0];
+			double PR_000011011000=P_000011011*R_000[0]+P_000011111*R_001[0]+a2P_000011000_1*R_002[0]+P_000111011*R_010[0]+P_000111111*R_011[0]+a2P_000111000_1*R_012[0]+a2P_000000011_1*R_020[0]+a2P_000000111_1*R_021[0]+aPin4*R_022[0];
+			double PR_000010012000=P_000010012*R_000[0]+P_000010112*R_001[0]+P_000010212*R_002[0]+a3P_000010000_1*R_003[0]+a1P_000000012_1*R_010[0]+a1P_000000112_1*R_011[0]+a1P_000000212_1*R_012[0]+aPin4*R_013[0];
+			double PR_002000020000=P_002000020*R_000[0]+a1P_002000010_2*R_001[0]+a2P_002000000_1*R_002[0]+a1P_001000020_2*R_100[0]+a2P_001000010_4*R_101[0]+a3P_001000000_2*R_102[0]+a2P_000000020_1*R_200[0]+a3P_000000010_2*R_201[0]+aPin4*R_202[0];
+			double PR_001001020000=P_001001020*R_000[0]+a1P_001001010_2*R_001[0]+a2P_001001000_1*R_002[0]+a1P_001000020_1*R_010[0]+a2P_001000010_2*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000001020_1*R_100[0]+a2P_000001010_2*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000020_1*R_110[0]+a3P_000000010_2*R_111[0]+aPin4*R_112[0];
+			double PR_000002020000=P_000002020*R_000[0]+a1P_000002010_2*R_001[0]+a2P_000002000_1*R_002[0]+a1P_000001020_2*R_010[0]+a2P_000001010_4*R_011[0]+a3P_000001000_2*R_012[0]+a2P_000000020_1*R_020[0]+a3P_000000010_2*R_021[0]+aPin4*R_022[0];
+			double PR_001000021000=P_001000021*R_000[0]+P_001000121*R_001[0]+P_001000221*R_002[0]+a3P_001000000_1*R_003[0]+a1P_000000021_1*R_100[0]+a1P_000000121_1*R_101[0]+a1P_000000221_1*R_102[0]+aPin4*R_103[0];
+			double PR_000001021000=P_000001021*R_000[0]+P_000001121*R_001[0]+P_000001221*R_002[0]+a3P_000001000_1*R_003[0]+a1P_000000021_1*R_010[0]+a1P_000000121_1*R_011[0]+a1P_000000221_1*R_012[0]+aPin4*R_013[0];
+			double PR_000000022000=P_000000022*R_000[0]+P_000000122*R_001[0]+P_000000222*R_002[0]+a2P_000000111_2*R_003[0]+aPin4*R_004[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_022000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_021001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020002000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(PR_021000001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(PR_020001001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(PR_020000002000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_012010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_011011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010012000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(PR_011010001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(PR_010011001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(PR_010010002000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_002020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_001021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000022000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(PR_001020001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(PR_000021001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(PR_000020002000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_012000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_011001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010002010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(PR_011000011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(PR_010001011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(PR_010000012000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_002010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_001011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000012010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(PR_001010011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(PR_000011011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(PR_000010012000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_002000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_001001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000002020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(PR_001000021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(PR_000001021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(PR_000000022000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ddss_CSE(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double Pd_010[3];
+				Pd_010[0]=PA[ii*3+0];
+				Pd_010[1]=PA[ii*3+1];
+				Pd_010[2]=PA[ii*3+2];
+				double Pd_001[3];
+				Pd_001[0]=PB[ii*3+0];
+				Pd_001[1]=PB[ii*3+1];
+				Pd_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+		double Pd_002[3];
+		double Pd_102[3];
+		double Pd_011[3];
+		double Pd_111[3];
+		double Pd_012[3];
+		double Pd_112[3];
+		double Pd_212[3];
+		double Pd_020[3];
+		double Pd_120[3];
+		double Pd_021[3];
+		double Pd_121[3];
+		double Pd_221[3];
+		double Pd_022[3];
+		double Pd_122[3];
+		double Pd_222[3];
+		for(int i=0;i<3;i++){
+			Pd_002[i]=aPin1+Pd_001[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_102[i]=Pd_001[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_011[i]=aPin1+Pd_010[i]*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_111[i]=Pd_010[i]*aPin1+aPin1*Pd_001[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_012[i]=Pd_111[i]+Pd_001[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_112[i]=2*aPin2+Pd_001[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_212[i]=Pd_001[i]*aPin2+aPin1*Pd_111[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_020[i]=aPin1+Pd_010[i]*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_120[i]=Pd_010[i]*aPin1+aPin1*Pd_010[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_021[i]=Pd_111[i]+Pd_010[i]*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_121[i]=2*aPin2+Pd_010[i]*Pd_111[i]+aPin1*Pd_011[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_221[i]=Pd_010[i]*aPin2+aPin1*Pd_111[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_022[i]=Pd_112[i]+Pd_010[i]*Pd_012[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_122[i]=2*Pd_212[i]+Pd_010[i]*Pd_112[i]+aPin1*Pd_012[i];
+			}
+		for(int i=0;i<3;i++){
+			Pd_222[i]=3*aPin3+Pd_010[i]*Pd_212[i]+aPin1*Pd_112[i];
+			}
+			double P_022000000;
+			double P_122000000;
+			double P_222000000;
+			double P_021001000;
+			double P_121001000;
+			double P_221001000;
+			double P_020002000;
+			double P_021000001;
+			double P_121000001;
+			double P_221000001;
+			double P_020001001;
+			double P_020000002;
+			double P_012010000;
+			double P_112010000;
+			double P_212010000;
+			double P_011011000;
+			double P_011111000;
+			double P_111011000;
+			double P_111111000;
+			double P_010012000;
+			double P_010112000;
+			double P_010212000;
+			double P_011010001;
+			double P_111010001;
+			double P_010011001;
+			double P_010111001;
+			double P_010010002;
+			double P_002020000;
+			double P_001021000;
+			double P_001121000;
+			double P_001221000;
+			double P_000022000;
+			double P_000122000;
+			double P_000222000;
+			double P_001020001;
+			double P_000021001;
+			double P_000121001;
+			double P_000221001;
+			double P_000020002;
+			double P_012000010;
+			double P_112000010;
+			double P_212000010;
+			double P_011001010;
+			double P_111001010;
+			double P_010002010;
+			double P_011000011;
+			double P_011000111;
+			double P_111000011;
+			double P_111000111;
+			double P_010001011;
+			double P_010001111;
+			double P_010000012;
+			double P_010000112;
+			double P_010000212;
+			double P_002010010;
+			double P_001011010;
+			double P_001111010;
+			double P_000012010;
+			double P_000112010;
+			double P_000212010;
+			double P_001010011;
+			double P_001010111;
+			double P_000011011;
+			double P_000011111;
+			double P_000111011;
+			double P_000111111;
+			double P_000010012;
+			double P_000010112;
+			double P_000010212;
+			double P_002000020;
+			double P_001001020;
+			double P_000002020;
+			double P_001000021;
+			double P_001000121;
+			double P_001000221;
+			double P_000001021;
+			double P_000001121;
+			double P_000001221;
+			double P_000000022;
+			double P_000000122;
+			double P_000000222;
+			double a2P_111000000_1;
+			double a2P_111000000_2;
+			double a1P_021000000_1;
+			double a1P_121000000_1;
+			double a1P_221000000_1;
+			double a3P_000001000_1;
+			double a3P_000001000_2;
+			double a1P_020001000_1;
+			double a1P_020001000_2;
+			double a2P_020000000_1;
+			double a1P_010002000_1;
+			double a1P_010002000_2;
+			double a2P_010001000_1;
+			double a2P_010001000_4;
+			double a2P_010001000_2;
+			double a3P_010000000_1;
+			double a3P_010000000_2;
+			double a2P_000002000_1;
+			double a3P_000000001_1;
+			double a3P_000000001_2;
+			double a1P_020000001_1;
+			double a1P_020000001_2;
+			double a1P_010001001_1;
+			double a1P_010001001_2;
+			double a2P_010000001_1;
+			double a2P_010000001_2;
+			double a2P_010000001_4;
+			double a2P_000001001_1;
+			double a1P_010000002_1;
+			double a1P_010000002_2;
+			double a2P_000000002_1;
+			double a1P_012000000_1;
+			double a1P_112000000_1;
+			double a1P_212000000_1;
+			double a3P_000010000_1;
+			double a3P_000010000_2;
+			double a2P_011000000_1;
+			double a2P_000011000_1;
+			double a2P_000111000_1;
+			double a2P_000111000_2;
+			double a1P_000012000_1;
+			double a1P_000112000_1;
+			double a1P_000212000_1;
+			double a1P_011010000_1;
+			double a1P_011000001_1;
+			double a1P_111010000_1;
+			double a1P_111000001_1;
+			double a2P_000010001_1;
+			double a2P_000010001_2;
+			double a2P_000010001_4;
+			double a1P_010011000_1;
+			double a1P_010111000_1;
+			double a1P_000011001_1;
+			double a1P_000111001_1;
+			double a1P_010010001_1;
+			double a1P_010010001_2;
+			double a2P_010010000_1;
+			double a1P_000010002_1;
+			double a1P_000010002_2;
+			double a1P_002010000_1;
+			double a1P_002010000_2;
+			double a2P_002000000_1;
+			double a1P_001020000_1;
+			double a1P_001020000_2;
+			double a2P_001010000_1;
+			double a2P_001010000_4;
+			double a2P_001010000_2;
+			double a3P_001000000_1;
+			double a3P_001000000_2;
+			double a2P_000020000_1;
+			double a1P_000021000_1;
+			double a1P_000121000_1;
+			double a1P_000221000_1;
+			double a1P_001010001_1;
+			double a1P_001010001_2;
+			double a2P_001000001_1;
+			double a1P_000020001_1;
+			double a1P_000020001_2;
+			double a3P_000000010_1;
+			double a3P_000000010_2;
+			double a1P_011001000_1;
+			double a1P_011000010_1;
+			double a1P_111001000_1;
+			double a1P_111000010_1;
+			double a2P_000001010_1;
+			double a2P_000001010_2;
+			double a2P_000001010_4;
+			double a1P_010001010_1;
+			double a1P_010001010_2;
+			double a2P_010000010_1;
+			double a1P_000002010_1;
+			double a1P_000002010_2;
+			double a2P_000000011_1;
+			double a2P_000000111_1;
+			double a2P_000000111_2;
+			double a1P_010000011_1;
+			double a1P_010000111_1;
+			double a1P_000001011_1;
+			double a1P_000001111_1;
+			double a1P_000000012_1;
+			double a1P_000000112_1;
+			double a1P_000000212_1;
+			double a1P_002000010_1;
+			double a1P_002000010_2;
+			double a1P_001010010_1;
+			double a1P_001010010_2;
+			double a2P_001000010_1;
+			double a2P_001000010_2;
+			double a2P_001000010_4;
+			double a2P_000010010_1;
+			double a1P_001011000_1;
+			double a1P_001111000_1;
+			double a1P_000011010_1;
+			double a1P_000111010_1;
+			double a1P_001000011_1;
+			double a1P_001000111_1;
+			double a1P_000010011_1;
+			double a1P_000010111_1;
+			double a1P_001000020_1;
+			double a1P_001000020_2;
+			double a2P_000000020_1;
+			double a1P_001001010_1;
+			double a1P_001001010_2;
+			double a2P_001001000_1;
+			double a1P_000001020_1;
+			double a1P_000001020_2;
+			double a1P_000000021_1;
+			double a1P_000000121_1;
+			double a1P_000000221_1;
+			P_022000000=Pd_022[0];
+			P_122000000=Pd_122[0];
+			P_222000000=Pd_222[0];
+			P_021001000=Pd_021[0]*Pd_001[1];
+			P_121001000=Pd_121[0]*Pd_001[1];
+			P_221001000=Pd_221[0]*Pd_001[1];
+			P_020002000=Pd_020[0]*Pd_002[1];
+			P_021000001=Pd_021[0]*Pd_001[2];
+			P_121000001=Pd_121[0]*Pd_001[2];
+			P_221000001=Pd_221[0]*Pd_001[2];
+			P_020001001=Pd_020[0]*Pd_001[1]*Pd_001[2];
+			P_020000002=Pd_020[0]*Pd_002[2];
+			P_012010000=Pd_012[0]*Pd_010[1];
+			P_112010000=Pd_112[0]*Pd_010[1];
+			P_212010000=Pd_212[0]*Pd_010[1];
+			P_011011000=Pd_011[0]*Pd_011[1];
+			P_011111000=Pd_011[0]*Pd_111[1];
+			P_111011000=Pd_111[0]*Pd_011[1];
+			P_111111000=Pd_111[0]*Pd_111[1];
+			P_010012000=Pd_010[0]*Pd_012[1];
+			P_010112000=Pd_010[0]*Pd_112[1];
+			P_010212000=Pd_010[0]*Pd_212[1];
+			P_011010001=Pd_011[0]*Pd_010[1]*Pd_001[2];
+			P_111010001=Pd_111[0]*Pd_010[1]*Pd_001[2];
+			P_010011001=Pd_010[0]*Pd_011[1]*Pd_001[2];
+			P_010111001=Pd_010[0]*Pd_111[1]*Pd_001[2];
+			P_010010002=Pd_010[0]*Pd_010[1]*Pd_002[2];
+			P_002020000=Pd_002[0]*Pd_020[1];
+			P_001021000=Pd_001[0]*Pd_021[1];
+			P_001121000=Pd_001[0]*Pd_121[1];
+			P_001221000=Pd_001[0]*Pd_221[1];
+			P_000022000=Pd_022[1];
+			P_000122000=Pd_122[1];
+			P_000222000=Pd_222[1];
+			P_001020001=Pd_001[0]*Pd_020[1]*Pd_001[2];
+			P_000021001=Pd_021[1]*Pd_001[2];
+			P_000121001=Pd_121[1]*Pd_001[2];
+			P_000221001=Pd_221[1]*Pd_001[2];
+			P_000020002=Pd_020[1]*Pd_002[2];
+			P_012000010=Pd_012[0]*Pd_010[2];
+			P_112000010=Pd_112[0]*Pd_010[2];
+			P_212000010=Pd_212[0]*Pd_010[2];
+			P_011001010=Pd_011[0]*Pd_001[1]*Pd_010[2];
+			P_111001010=Pd_111[0]*Pd_001[1]*Pd_010[2];
+			P_010002010=Pd_010[0]*Pd_002[1]*Pd_010[2];
+			P_011000011=Pd_011[0]*Pd_011[2];
+			P_011000111=Pd_011[0]*Pd_111[2];
+			P_111000011=Pd_111[0]*Pd_011[2];
+			P_111000111=Pd_111[0]*Pd_111[2];
+			P_010001011=Pd_010[0]*Pd_001[1]*Pd_011[2];
+			P_010001111=Pd_010[0]*Pd_001[1]*Pd_111[2];
+			P_010000012=Pd_010[0]*Pd_012[2];
+			P_010000112=Pd_010[0]*Pd_112[2];
+			P_010000212=Pd_010[0]*Pd_212[2];
+			P_002010010=Pd_002[0]*Pd_010[1]*Pd_010[2];
+			P_001011010=Pd_001[0]*Pd_011[1]*Pd_010[2];
+			P_001111010=Pd_001[0]*Pd_111[1]*Pd_010[2];
+			P_000012010=Pd_012[1]*Pd_010[2];
+			P_000112010=Pd_112[1]*Pd_010[2];
+			P_000212010=Pd_212[1]*Pd_010[2];
+			P_001010011=Pd_001[0]*Pd_010[1]*Pd_011[2];
+			P_001010111=Pd_001[0]*Pd_010[1]*Pd_111[2];
+			P_000011011=Pd_011[1]*Pd_011[2];
+			P_000011111=Pd_011[1]*Pd_111[2];
+			P_000111011=Pd_111[1]*Pd_011[2];
+			P_000111111=Pd_111[1]*Pd_111[2];
+			P_000010012=Pd_010[1]*Pd_012[2];
+			P_000010112=Pd_010[1]*Pd_112[2];
+			P_000010212=Pd_010[1]*Pd_212[2];
+			P_002000020=Pd_002[0]*Pd_020[2];
+			P_001001020=Pd_001[0]*Pd_001[1]*Pd_020[2];
+			P_000002020=Pd_002[1]*Pd_020[2];
+			P_001000021=Pd_001[0]*Pd_021[2];
+			P_001000121=Pd_001[0]*Pd_121[2];
+			P_001000221=Pd_001[0]*Pd_221[2];
+			P_000001021=Pd_001[1]*Pd_021[2];
+			P_000001121=Pd_001[1]*Pd_121[2];
+			P_000001221=Pd_001[1]*Pd_221[2];
+			P_000000022=Pd_022[2];
+			P_000000122=Pd_122[2];
+			P_000000222=Pd_222[2];
+			a2P_111000000_1=Pd_111[0];
+			a2P_111000000_2=2*a2P_111000000_1;
+			a1P_021000000_1=Pd_021[0];
+			a1P_121000000_1=Pd_121[0];
+			a1P_221000000_1=Pd_221[0];
+			a3P_000001000_1=Pd_001[1];
+			a3P_000001000_2=2*a3P_000001000_1;
+			a1P_020001000_1=Pd_020[0]*Pd_001[1];
+			a1P_020001000_2=2*a1P_020001000_1;
+			a2P_020000000_1=Pd_020[0];
+			a1P_010002000_1=Pd_010[0]*Pd_002[1];
+			a1P_010002000_2=2*a1P_010002000_1;
+			a2P_010001000_1=Pd_010[0]*Pd_001[1];
+			a2P_010001000_4=4*a2P_010001000_1;
+			a2P_010001000_2=2*a2P_010001000_1;
+			a3P_010000000_1=Pd_010[0];
+			a3P_010000000_2=2*a3P_010000000_1;
+			a2P_000002000_1=Pd_002[1];
+			a3P_000000001_1=Pd_001[2];
+			a3P_000000001_2=2*a3P_000000001_1;
+			a1P_020000001_1=Pd_020[0]*Pd_001[2];
+			a1P_020000001_2=2*a1P_020000001_1;
+			a1P_010001001_1=Pd_010[0]*Pd_001[1]*Pd_001[2];
+			a1P_010001001_2=2*a1P_010001001_1;
+			a2P_010000001_1=Pd_010[0]*Pd_001[2];
+			a2P_010000001_2=2*a2P_010000001_1;
+			a2P_010000001_4=4*a2P_010000001_1;
+			a2P_000001001_1=Pd_001[1]*Pd_001[2];
+			a1P_010000002_1=Pd_010[0]*Pd_002[2];
+			a1P_010000002_2=2*a1P_010000002_1;
+			a2P_000000002_1=Pd_002[2];
+			a1P_012000000_1=Pd_012[0];
+			a1P_112000000_1=Pd_112[0];
+			a1P_212000000_1=Pd_212[0];
+			a3P_000010000_1=Pd_010[1];
+			a3P_000010000_2=2*a3P_000010000_1;
+			a2P_011000000_1=Pd_011[0];
+			a2P_000011000_1=Pd_011[1];
+			a2P_000111000_1=Pd_111[1];
+			a2P_000111000_2=2*a2P_000111000_1;
+			a1P_000012000_1=Pd_012[1];
+			a1P_000112000_1=Pd_112[1];
+			a1P_000212000_1=Pd_212[1];
+			a1P_011010000_1=Pd_011[0]*Pd_010[1];
+			a1P_011000001_1=Pd_011[0]*Pd_001[2];
+			a1P_111010000_1=Pd_111[0]*Pd_010[1];
+			a1P_111000001_1=Pd_111[0]*Pd_001[2];
+			a2P_000010001_1=Pd_010[1]*Pd_001[2];
+			a2P_000010001_2=2*a2P_000010001_1;
+			a2P_000010001_4=4*a2P_000010001_1;
+			a1P_010011000_1=Pd_010[0]*Pd_011[1];
+			a1P_010111000_1=Pd_010[0]*Pd_111[1];
+			a1P_000011001_1=Pd_011[1]*Pd_001[2];
+			a1P_000111001_1=Pd_111[1]*Pd_001[2];
+			a1P_010010001_1=Pd_010[0]*Pd_010[1]*Pd_001[2];
+			a1P_010010001_2=2*a1P_010010001_1;
+			a2P_010010000_1=Pd_010[0]*Pd_010[1];
+			a1P_000010002_1=Pd_010[1]*Pd_002[2];
+			a1P_000010002_2=2*a1P_000010002_1;
+			a1P_002010000_1=Pd_002[0]*Pd_010[1];
+			a1P_002010000_2=2*a1P_002010000_1;
+			a2P_002000000_1=Pd_002[0];
+			a1P_001020000_1=Pd_001[0]*Pd_020[1];
+			a1P_001020000_2=2*a1P_001020000_1;
+			a2P_001010000_1=Pd_001[0]*Pd_010[1];
+			a2P_001010000_4=4*a2P_001010000_1;
+			a2P_001010000_2=2*a2P_001010000_1;
+			a3P_001000000_1=Pd_001[0];
+			a3P_001000000_2=2*a3P_001000000_1;
+			a2P_000020000_1=Pd_020[1];
+			a1P_000021000_1=Pd_021[1];
+			a1P_000121000_1=Pd_121[1];
+			a1P_000221000_1=Pd_221[1];
+			a1P_001010001_1=Pd_001[0]*Pd_010[1]*Pd_001[2];
+			a1P_001010001_2=2*a1P_001010001_1;
+			a2P_001000001_1=Pd_001[0]*Pd_001[2];
+			a1P_000020001_1=Pd_020[1]*Pd_001[2];
+			a1P_000020001_2=2*a1P_000020001_1;
+			a3P_000000010_1=Pd_010[2];
+			a3P_000000010_2=2*a3P_000000010_1;
+			a1P_011001000_1=Pd_011[0]*Pd_001[1];
+			a1P_011000010_1=Pd_011[0]*Pd_010[2];
+			a1P_111001000_1=Pd_111[0]*Pd_001[1];
+			a1P_111000010_1=Pd_111[0]*Pd_010[2];
+			a2P_000001010_1=Pd_001[1]*Pd_010[2];
+			a2P_000001010_2=2*a2P_000001010_1;
+			a2P_000001010_4=4*a2P_000001010_1;
+			a1P_010001010_1=Pd_010[0]*Pd_001[1]*Pd_010[2];
+			a1P_010001010_2=2*a1P_010001010_1;
+			a2P_010000010_1=Pd_010[0]*Pd_010[2];
+			a1P_000002010_1=Pd_002[1]*Pd_010[2];
+			a1P_000002010_2=2*a1P_000002010_1;
+			a2P_000000011_1=Pd_011[2];
+			a2P_000000111_1=Pd_111[2];
+			a2P_000000111_2=2*a2P_000000111_1;
+			a1P_010000011_1=Pd_010[0]*Pd_011[2];
+			a1P_010000111_1=Pd_010[0]*Pd_111[2];
+			a1P_000001011_1=Pd_001[1]*Pd_011[2];
+			a1P_000001111_1=Pd_001[1]*Pd_111[2];
+			a1P_000000012_1=Pd_012[2];
+			a1P_000000112_1=Pd_112[2];
+			a1P_000000212_1=Pd_212[2];
+			a1P_002000010_1=Pd_002[0]*Pd_010[2];
+			a1P_002000010_2=2*a1P_002000010_1;
+			a1P_001010010_1=Pd_001[0]*Pd_010[1]*Pd_010[2];
+			a1P_001010010_2=2*a1P_001010010_1;
+			a2P_001000010_1=Pd_001[0]*Pd_010[2];
+			a2P_001000010_2=2*a2P_001000010_1;
+			a2P_001000010_4=4*a2P_001000010_1;
+			a2P_000010010_1=Pd_010[1]*Pd_010[2];
+			a1P_001011000_1=Pd_001[0]*Pd_011[1];
+			a1P_001111000_1=Pd_001[0]*Pd_111[1];
+			a1P_000011010_1=Pd_011[1]*Pd_010[2];
+			a1P_000111010_1=Pd_111[1]*Pd_010[2];
+			a1P_001000011_1=Pd_001[0]*Pd_011[2];
+			a1P_001000111_1=Pd_001[0]*Pd_111[2];
+			a1P_000010011_1=Pd_010[1]*Pd_011[2];
+			a1P_000010111_1=Pd_010[1]*Pd_111[2];
+			a1P_001000020_1=Pd_001[0]*Pd_020[2];
+			a1P_001000020_2=2*a1P_001000020_1;
+			a2P_000000020_1=Pd_020[2];
+			a1P_001001010_1=Pd_001[0]*Pd_001[1]*Pd_010[2];
+			a1P_001001010_2=2*a1P_001001010_1;
+			a2P_001001000_1=Pd_001[0]*Pd_001[1];
+			a1P_000001020_1=Pd_001[1]*Pd_020[2];
+			a1P_000001020_2=2*a1P_000001020_1;
+			a1P_000000021_1=Pd_021[2];
+			a1P_000000121_1=Pd_121[2];
+			a1P_000000221_1=Pd_221[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_022000000*R_000[0]+P_122000000*R_100[0]+P_222000000*R_200[0]+a2P_111000000_2*R_300[0]+aPin4*R_400[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_021001000*R_000[0]+a1P_021000000_1*R_010[0]+P_121001000*R_100[0]+a1P_121000000_1*R_110[0]+P_221001000*R_200[0]+a1P_221000000_1*R_210[0]+a3P_000001000_1*R_300[0]+aPin4*R_310[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020002000*R_000[0]+a1P_020001000_2*R_010[0]+a2P_020000000_1*R_020[0]+a1P_010002000_2*R_100[0]+a2P_010001000_4*R_110[0]+a3P_010000000_2*R_120[0]+a2P_000002000_1*R_200[0]+a3P_000001000_2*R_210[0]+aPin4*R_220[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(P_021000001*R_000[0]+a1P_021000000_1*R_001[0]+P_121000001*R_100[0]+a1P_121000000_1*R_101[0]+P_221000001*R_200[0]+a1P_221000000_1*R_201[0]+a3P_000000001_1*R_300[0]+aPin4*R_301[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(P_020001001*R_000[0]+a1P_020001000_1*R_001[0]+a1P_020000001_1*R_010[0]+a2P_020000000_1*R_011[0]+a1P_010001001_2*R_100[0]+a2P_010001000_2*R_101[0]+a2P_010000001_2*R_110[0]+a3P_010000000_2*R_111[0]+a2P_000001001_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000001_1*R_210[0]+aPin4*R_211[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(P_020000002*R_000[0]+a1P_020000001_2*R_001[0]+a2P_020000000_1*R_002[0]+a1P_010000002_2*R_100[0]+a2P_010000001_4*R_101[0]+a3P_010000000_2*R_102[0]+a2P_000000002_1*R_200[0]+a3P_000000001_2*R_201[0]+aPin4*R_202[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_012010000*R_000[0]+a1P_012000000_1*R_010[0]+P_112010000*R_100[0]+a1P_112000000_1*R_110[0]+P_212010000*R_200[0]+a1P_212000000_1*R_210[0]+a3P_000010000_1*R_300[0]+aPin4*R_310[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_011011000*R_000[0]+P_011111000*R_010[0]+a2P_011000000_1*R_020[0]+P_111011000*R_100[0]+P_111111000*R_110[0]+a2P_111000000_1*R_120[0]+a2P_000011000_1*R_200[0]+a2P_000111000_1*R_210[0]+aPin4*R_220[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010012000*R_000[0]+P_010112000*R_010[0]+P_010212000*R_020[0]+a3P_010000000_1*R_030[0]+a1P_000012000_1*R_100[0]+a1P_000112000_1*R_110[0]+a1P_000212000_1*R_120[0]+aPin4*R_130[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(P_011010001*R_000[0]+a1P_011010000_1*R_001[0]+a1P_011000001_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111010001*R_100[0]+a1P_111010000_1*R_101[0]+a1P_111000001_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000010001_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000001_1*R_210[0]+aPin4*R_211[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(P_010011001*R_000[0]+a1P_010011000_1*R_001[0]+P_010111001*R_010[0]+a1P_010111000_1*R_011[0]+a2P_010000001_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000011001_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111001_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000001_1*R_120[0]+aPin4*R_121[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(P_010010002*R_000[0]+a1P_010010001_2*R_001[0]+a2P_010010000_1*R_002[0]+a1P_010000002_1*R_010[0]+a2P_010000001_2*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000010002_1*R_100[0]+a2P_000010001_2*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000002_1*R_110[0]+a3P_000000001_2*R_111[0]+aPin4*R_112[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_002020000*R_000[0]+a1P_002010000_2*R_010[0]+a2P_002000000_1*R_020[0]+a1P_001020000_2*R_100[0]+a2P_001010000_4*R_110[0]+a3P_001000000_2*R_120[0]+a2P_000020000_1*R_200[0]+a3P_000010000_2*R_210[0]+aPin4*R_220[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_001021000*R_000[0]+P_001121000*R_010[0]+P_001221000*R_020[0]+a3P_001000000_1*R_030[0]+a1P_000021000_1*R_100[0]+a1P_000121000_1*R_110[0]+a1P_000221000_1*R_120[0]+aPin4*R_130[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000022000*R_000[0]+P_000122000*R_010[0]+P_000222000*R_020[0]+a2P_000111000_2*R_030[0]+aPin4*R_040[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(P_001020001*R_000[0]+a1P_001020000_1*R_001[0]+a1P_001010001_2*R_010[0]+a2P_001010000_2*R_011[0]+a2P_001000001_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000020001_1*R_100[0]+a2P_000020000_1*R_101[0]+a2P_000010001_2*R_110[0]+a3P_000010000_2*R_111[0]+a3P_000000001_1*R_120[0]+aPin4*R_121[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(P_000021001*R_000[0]+a1P_000021000_1*R_001[0]+P_000121001*R_010[0]+a1P_000121000_1*R_011[0]+P_000221001*R_020[0]+a1P_000221000_1*R_021[0]+a3P_000000001_1*R_030[0]+aPin4*R_031[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(P_000020002*R_000[0]+a1P_000020001_2*R_001[0]+a2P_000020000_1*R_002[0]+a1P_000010002_2*R_010[0]+a2P_000010001_4*R_011[0]+a3P_000010000_2*R_012[0]+a2P_000000002_1*R_020[0]+a3P_000000001_2*R_021[0]+aPin4*R_022[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_012000010*R_000[0]+a1P_012000000_1*R_001[0]+P_112000010*R_100[0]+a1P_112000000_1*R_101[0]+P_212000010*R_200[0]+a1P_212000000_1*R_201[0]+a3P_000000010_1*R_300[0]+aPin4*R_301[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_011001010*R_000[0]+a1P_011001000_1*R_001[0]+a1P_011000010_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111001010*R_100[0]+a1P_111001000_1*R_101[0]+a1P_111000010_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000001010_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000010_1*R_210[0]+aPin4*R_211[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010002010*R_000[0]+a1P_010002000_1*R_001[0]+a1P_010001010_2*R_010[0]+a2P_010001000_2*R_011[0]+a2P_010000010_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000002010_1*R_100[0]+a2P_000002000_1*R_101[0]+a2P_000001010_2*R_110[0]+a3P_000001000_2*R_111[0]+a3P_000000010_1*R_120[0]+aPin4*R_121[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(P_011000011*R_000[0]+P_011000111*R_001[0]+a2P_011000000_1*R_002[0]+P_111000011*R_100[0]+P_111000111*R_101[0]+a2P_111000000_1*R_102[0]+a2P_000000011_1*R_200[0]+a2P_000000111_1*R_201[0]+aPin4*R_202[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(P_010001011*R_000[0]+P_010001111*R_001[0]+a2P_010001000_1*R_002[0]+a1P_010000011_1*R_010[0]+a1P_010000111_1*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000001011_1*R_100[0]+a1P_000001111_1*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+aPin4*R_112[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(P_010000012*R_000[0]+P_010000112*R_001[0]+P_010000212*R_002[0]+a3P_010000000_1*R_003[0]+a1P_000000012_1*R_100[0]+a1P_000000112_1*R_101[0]+a1P_000000212_1*R_102[0]+aPin4*R_103[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_002010010*R_000[0]+a1P_002010000_1*R_001[0]+a1P_002000010_1*R_010[0]+a2P_002000000_1*R_011[0]+a1P_001010010_2*R_100[0]+a2P_001010000_2*R_101[0]+a2P_001000010_2*R_110[0]+a3P_001000000_2*R_111[0]+a2P_000010010_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000010_1*R_210[0]+aPin4*R_211[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_001011010*R_000[0]+a1P_001011000_1*R_001[0]+P_001111010*R_010[0]+a1P_001111000_1*R_011[0]+a2P_001000010_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000011010_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111010_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000010_1*R_120[0]+aPin4*R_121[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000012010*R_000[0]+a1P_000012000_1*R_001[0]+P_000112010*R_010[0]+a1P_000112000_1*R_011[0]+P_000212010*R_020[0]+a1P_000212000_1*R_021[0]+a3P_000000010_1*R_030[0]+aPin4*R_031[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(P_001010011*R_000[0]+P_001010111*R_001[0]+a2P_001010000_1*R_002[0]+a1P_001000011_1*R_010[0]+a1P_001000111_1*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000010011_1*R_100[0]+a1P_000010111_1*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+aPin4*R_112[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(P_000011011*R_000[0]+P_000011111*R_001[0]+a2P_000011000_1*R_002[0]+P_000111011*R_010[0]+P_000111111*R_011[0]+a2P_000111000_1*R_012[0]+a2P_000000011_1*R_020[0]+a2P_000000111_1*R_021[0]+aPin4*R_022[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(P_000010012*R_000[0]+P_000010112*R_001[0]+P_000010212*R_002[0]+a3P_000010000_1*R_003[0]+a1P_000000012_1*R_010[0]+a1P_000000112_1*R_011[0]+a1P_000000212_1*R_012[0]+aPin4*R_013[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_002000020*R_000[0]+a1P_002000010_2*R_001[0]+a2P_002000000_1*R_002[0]+a1P_001000020_2*R_100[0]+a2P_001000010_4*R_101[0]+a3P_001000000_2*R_102[0]+a2P_000000020_1*R_200[0]+a3P_000000010_2*R_201[0]+aPin4*R_202[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_001001020*R_000[0]+a1P_001001010_2*R_001[0]+a2P_001001000_1*R_002[0]+a1P_001000020_1*R_010[0]+a2P_001000010_2*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000001020_1*R_100[0]+a2P_000001010_2*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000020_1*R_110[0]+a3P_000000010_2*R_111[0]+aPin4*R_112[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000002020*R_000[0]+a1P_000002010_2*R_001[0]+a2P_000002000_1*R_002[0]+a1P_000001020_2*R_010[0]+a2P_000001010_4*R_011[0]+a3P_000001000_2*R_012[0]+a2P_000000020_1*R_020[0]+a3P_000000010_2*R_021[0]+aPin4*R_022[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(P_001000021*R_000[0]+P_001000121*R_001[0]+P_001000221*R_002[0]+a3P_001000000_1*R_003[0]+a1P_000000021_1*R_100[0]+a1P_000000121_1*R_101[0]+a1P_000000221_1*R_102[0]+aPin4*R_103[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(P_000001021*R_000[0]+P_000001121*R_001[0]+P_000001221*R_002[0]+a3P_000001000_1*R_003[0]+a1P_000000021_1*R_010[0]+a1P_000000121_1*R_011[0]+a1P_000000221_1*R_012[0]+aPin4*R_013[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(P_000000022*R_000[0]+P_000000122*R_001[0]+P_000000222*R_002[0]+a2P_000000111_2*R_003[0]+aPin4*R_004[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kp_ddss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_ket_start;ii<primit_ket_end;ii++){
+            unsigned int id_ket=id_ket_in[ii];
+				double QX=Q[ii*3+0];
+				double QY=Q[ii*3+1];
+				double QZ=Q[ii*3+2];
+				double Eta=Eta_in[ii];
+				double pq=pq_in[ii];
+            float K2_q=K2_q_in[ii];
+        for(unsigned int j=tId_x;j<primit_bra_end-primit_bra_start;j+=tdis){
+            unsigned int jj=primit_bra_start+j;
+            unsigned int id_bra=tex1Dfetch(tex_id_bra,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_p=tex1Dfetch(tex_K2_p,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Zta,jj);
+            double Zta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pp,jj);
+            double pp=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+0);
+            double PX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+1);
+            double PY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_P,jj*3+2);
+            double PZ=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_010[3];
+            temp_int2=tex1Dfetch(tex_PA,jj*3+0);
+            PD_010[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+1);
+            PD_010[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PA,jj*3+2);
+            PD_010[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+				double PD_001[3];
+            temp_int2=tex1Dfetch(tex_PB,jj*3+0);
+            PD_001[0]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+1);
+            PD_001[1]=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_PB,jj*3+2);
+            PD_001[2]=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	R_000[4]*=aPin4;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<4;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_200[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_020[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_002[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		double PD_022[3];
+		double PD_122[3];
+		double PD_222[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=(2.000000*PD_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=(PD_002[i]+2.000000*PD_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=(0.500000*PD_102[i]+PD_111[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=(2.000000*PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=(2.000000*PD_011[i]+PD_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=(PD_111[i]+0.500000*PD_120[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_022[i]=PD_112[i]+PD_010[i]*PD_012[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_122[i]=2.000000*(PD_012[i]+PD_021[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_222[i]=(PD_112[i]+PD_121[i]);
+			}
+			double P_022000000;
+			double P_122000000;
+			double P_222000000;
+			double P_021001000;
+			double P_121001000;
+			double P_221001000;
+			double P_020002000;
+			double P_021000001;
+			double P_121000001;
+			double P_221000001;
+			double P_020001001;
+			double P_020000002;
+			double P_012010000;
+			double P_112010000;
+			double P_212010000;
+			double P_011011000;
+			double P_011111000;
+			double P_111011000;
+			double P_111111000;
+			double P_010012000;
+			double P_010112000;
+			double P_010212000;
+			double P_011010001;
+			double P_111010001;
+			double P_010011001;
+			double P_010111001;
+			double P_010010002;
+			double P_002020000;
+			double P_001021000;
+			double P_001121000;
+			double P_001221000;
+			double P_000022000;
+			double P_000122000;
+			double P_000222000;
+			double P_001020001;
+			double P_000021001;
+			double P_000121001;
+			double P_000221001;
+			double P_000020002;
+			double P_012000010;
+			double P_112000010;
+			double P_212000010;
+			double P_011001010;
+			double P_111001010;
+			double P_010002010;
+			double P_011000011;
+			double P_011000111;
+			double P_111000011;
+			double P_111000111;
+			double P_010001011;
+			double P_010001111;
+			double P_010000012;
+			double P_010000112;
+			double P_010000212;
+			double P_002010010;
+			double P_001011010;
+			double P_001111010;
+			double P_000012010;
+			double P_000112010;
+			double P_000212010;
+			double P_001010011;
+			double P_001010111;
+			double P_000011011;
+			double P_000011111;
+			double P_000111011;
+			double P_000111111;
+			double P_000010012;
+			double P_000010112;
+			double P_000010212;
+			double P_002000020;
+			double P_001001020;
+			double P_000002020;
+			double P_001000021;
+			double P_001000121;
+			double P_001000221;
+			double P_000001021;
+			double P_000001121;
+			double P_000001221;
+			double P_000000022;
+			double P_000000122;
+			double P_000000222;
+			double a2P_111000000_1;
+			double a2P_111000000_2;
+			double a1P_021000000_1;
+			double a1P_121000000_1;
+			double a1P_221000000_1;
+			double a3P_000001000_1;
+			double a3P_000001000_2;
+			double a1P_020001000_1;
+			double a1P_020001000_2;
+			double a2P_020000000_1;
+			double a1P_010002000_1;
+			double a1P_010002000_2;
+			double a2P_010001000_1;
+			double a2P_010001000_4;
+			double a2P_010001000_2;
+			double a3P_010000000_1;
+			double a3P_010000000_2;
+			double a2P_000002000_1;
+			double a3P_000000001_1;
+			double a3P_000000001_2;
+			double a1P_020000001_1;
+			double a1P_020000001_2;
+			double a1P_010001001_1;
+			double a1P_010001001_2;
+			double a2P_010000001_1;
+			double a2P_010000001_2;
+			double a2P_010000001_4;
+			double a2P_000001001_1;
+			double a1P_010000002_1;
+			double a1P_010000002_2;
+			double a2P_000000002_1;
+			double a1P_012000000_1;
+			double a1P_112000000_1;
+			double a1P_212000000_1;
+			double a3P_000010000_1;
+			double a3P_000010000_2;
+			double a2P_011000000_1;
+			double a2P_000011000_1;
+			double a2P_000111000_1;
+			double a2P_000111000_2;
+			double a1P_000012000_1;
+			double a1P_000112000_1;
+			double a1P_000212000_1;
+			double a1P_011010000_1;
+			double a1P_011000001_1;
+			double a1P_111010000_1;
+			double a1P_111000001_1;
+			double a2P_000010001_1;
+			double a2P_000010001_2;
+			double a2P_000010001_4;
+			double a1P_010011000_1;
+			double a1P_010111000_1;
+			double a1P_000011001_1;
+			double a1P_000111001_1;
+			double a1P_010010001_1;
+			double a1P_010010001_2;
+			double a2P_010010000_1;
+			double a1P_000010002_1;
+			double a1P_000010002_2;
+			double a1P_002010000_1;
+			double a1P_002010000_2;
+			double a2P_002000000_1;
+			double a1P_001020000_1;
+			double a1P_001020000_2;
+			double a2P_001010000_1;
+			double a2P_001010000_4;
+			double a2P_001010000_2;
+			double a3P_001000000_1;
+			double a3P_001000000_2;
+			double a2P_000020000_1;
+			double a1P_000021000_1;
+			double a1P_000121000_1;
+			double a1P_000221000_1;
+			double a1P_001010001_1;
+			double a1P_001010001_2;
+			double a2P_001000001_1;
+			double a1P_000020001_1;
+			double a1P_000020001_2;
+			double a3P_000000010_1;
+			double a3P_000000010_2;
+			double a1P_011001000_1;
+			double a1P_011000010_1;
+			double a1P_111001000_1;
+			double a1P_111000010_1;
+			double a2P_000001010_1;
+			double a2P_000001010_2;
+			double a2P_000001010_4;
+			double a1P_010001010_1;
+			double a1P_010001010_2;
+			double a2P_010000010_1;
+			double a1P_000002010_1;
+			double a1P_000002010_2;
+			double a2P_000000011_1;
+			double a2P_000000111_1;
+			double a2P_000000111_2;
+			double a1P_010000011_1;
+			double a1P_010000111_1;
+			double a1P_000001011_1;
+			double a1P_000001111_1;
+			double a1P_000000012_1;
+			double a1P_000000112_1;
+			double a1P_000000212_1;
+			double a1P_002000010_1;
+			double a1P_002000010_2;
+			double a1P_001010010_1;
+			double a1P_001010010_2;
+			double a2P_001000010_1;
+			double a2P_001000010_2;
+			double a2P_001000010_4;
+			double a2P_000010010_1;
+			double a1P_001011000_1;
+			double a1P_001111000_1;
+			double a1P_000011010_1;
+			double a1P_000111010_1;
+			double a1P_001000011_1;
+			double a1P_001000111_1;
+			double a1P_000010011_1;
+			double a1P_000010111_1;
+			double a1P_001000020_1;
+			double a1P_001000020_2;
+			double a2P_000000020_1;
+			double a1P_001001010_1;
+			double a1P_001001010_2;
+			double a2P_001001000_1;
+			double a1P_000001020_1;
+			double a1P_000001020_2;
+			double a1P_000000021_1;
+			double a1P_000000121_1;
+			double a1P_000000221_1;
+			P_022000000=PD_022[0];
+			P_122000000=PD_122[0];
+			P_222000000=PD_222[0];
+			P_021001000=PD_021[0]*PD_001[1];
+			P_121001000=PD_121[0]*PD_001[1];
+			P_221001000=PD_221[0]*PD_001[1];
+			P_020002000=PD_020[0]*PD_002[1];
+			P_021000001=PD_021[0]*PD_001[2];
+			P_121000001=PD_121[0]*PD_001[2];
+			P_221000001=PD_221[0]*PD_001[2];
+			P_020001001=PD_020[0]*PD_001[1]*PD_001[2];
+			P_020000002=PD_020[0]*PD_002[2];
+			P_012010000=PD_012[0]*PD_010[1];
+			P_112010000=PD_112[0]*PD_010[1];
+			P_212010000=PD_212[0]*PD_010[1];
+			P_011011000=PD_011[0]*PD_011[1];
+			P_011111000=PD_011[0]*PD_111[1];
+			P_111011000=PD_111[0]*PD_011[1];
+			P_111111000=PD_111[0]*PD_111[1];
+			P_010012000=PD_010[0]*PD_012[1];
+			P_010112000=PD_010[0]*PD_112[1];
+			P_010212000=PD_010[0]*PD_212[1];
+			P_011010001=PD_011[0]*PD_010[1]*PD_001[2];
+			P_111010001=PD_111[0]*PD_010[1]*PD_001[2];
+			P_010011001=PD_010[0]*PD_011[1]*PD_001[2];
+			P_010111001=PD_010[0]*PD_111[1]*PD_001[2];
+			P_010010002=PD_010[0]*PD_010[1]*PD_002[2];
+			P_002020000=PD_002[0]*PD_020[1];
+			P_001021000=PD_001[0]*PD_021[1];
+			P_001121000=PD_001[0]*PD_121[1];
+			P_001221000=PD_001[0]*PD_221[1];
+			P_000022000=PD_022[1];
+			P_000122000=PD_122[1];
+			P_000222000=PD_222[1];
+			P_001020001=PD_001[0]*PD_020[1]*PD_001[2];
+			P_000021001=PD_021[1]*PD_001[2];
+			P_000121001=PD_121[1]*PD_001[2];
+			P_000221001=PD_221[1]*PD_001[2];
+			P_000020002=PD_020[1]*PD_002[2];
+			P_012000010=PD_012[0]*PD_010[2];
+			P_112000010=PD_112[0]*PD_010[2];
+			P_212000010=PD_212[0]*PD_010[2];
+			P_011001010=PD_011[0]*PD_001[1]*PD_010[2];
+			P_111001010=PD_111[0]*PD_001[1]*PD_010[2];
+			P_010002010=PD_010[0]*PD_002[1]*PD_010[2];
+			P_011000011=PD_011[0]*PD_011[2];
+			P_011000111=PD_011[0]*PD_111[2];
+			P_111000011=PD_111[0]*PD_011[2];
+			P_111000111=PD_111[0]*PD_111[2];
+			P_010001011=PD_010[0]*PD_001[1]*PD_011[2];
+			P_010001111=PD_010[0]*PD_001[1]*PD_111[2];
+			P_010000012=PD_010[0]*PD_012[2];
+			P_010000112=PD_010[0]*PD_112[2];
+			P_010000212=PD_010[0]*PD_212[2];
+			P_002010010=PD_002[0]*PD_010[1]*PD_010[2];
+			P_001011010=PD_001[0]*PD_011[1]*PD_010[2];
+			P_001111010=PD_001[0]*PD_111[1]*PD_010[2];
+			P_000012010=PD_012[1]*PD_010[2];
+			P_000112010=PD_112[1]*PD_010[2];
+			P_000212010=PD_212[1]*PD_010[2];
+			P_001010011=PD_001[0]*PD_010[1]*PD_011[2];
+			P_001010111=PD_001[0]*PD_010[1]*PD_111[2];
+			P_000011011=PD_011[1]*PD_011[2];
+			P_000011111=PD_011[1]*PD_111[2];
+			P_000111011=PD_111[1]*PD_011[2];
+			P_000111111=PD_111[1]*PD_111[2];
+			P_000010012=PD_010[1]*PD_012[2];
+			P_000010112=PD_010[1]*PD_112[2];
+			P_000010212=PD_010[1]*PD_212[2];
+			P_002000020=PD_002[0]*PD_020[2];
+			P_001001020=PD_001[0]*PD_001[1]*PD_020[2];
+			P_000002020=PD_002[1]*PD_020[2];
+			P_001000021=PD_001[0]*PD_021[2];
+			P_001000121=PD_001[0]*PD_121[2];
+			P_001000221=PD_001[0]*PD_221[2];
+			P_000001021=PD_001[1]*PD_021[2];
+			P_000001121=PD_001[1]*PD_121[2];
+			P_000001221=PD_001[1]*PD_221[2];
+			P_000000022=PD_022[2];
+			P_000000122=PD_122[2];
+			P_000000222=PD_222[2];
+			a2P_111000000_1=PD_111[0];
+			a2P_111000000_2=2*a2P_111000000_1;
+			a1P_021000000_1=PD_021[0];
+			a1P_121000000_1=PD_121[0];
+			a1P_221000000_1=PD_221[0];
+			a3P_000001000_1=PD_001[1];
+			a3P_000001000_2=2*a3P_000001000_1;
+			a1P_020001000_1=PD_020[0]*PD_001[1];
+			a1P_020001000_2=2*a1P_020001000_1;
+			a2P_020000000_1=PD_020[0];
+			a1P_010002000_1=PD_010[0]*PD_002[1];
+			a1P_010002000_2=2*a1P_010002000_1;
+			a2P_010001000_1=PD_010[0]*PD_001[1];
+			a2P_010001000_4=4*a2P_010001000_1;
+			a2P_010001000_2=2*a2P_010001000_1;
+			a3P_010000000_1=PD_010[0];
+			a3P_010000000_2=2*a3P_010000000_1;
+			a2P_000002000_1=PD_002[1];
+			a3P_000000001_1=PD_001[2];
+			a3P_000000001_2=2*a3P_000000001_1;
+			a1P_020000001_1=PD_020[0]*PD_001[2];
+			a1P_020000001_2=2*a1P_020000001_1;
+			a1P_010001001_1=PD_010[0]*PD_001[1]*PD_001[2];
+			a1P_010001001_2=2*a1P_010001001_1;
+			a2P_010000001_1=PD_010[0]*PD_001[2];
+			a2P_010000001_2=2*a2P_010000001_1;
+			a2P_010000001_4=4*a2P_010000001_1;
+			a2P_000001001_1=PD_001[1]*PD_001[2];
+			a1P_010000002_1=PD_010[0]*PD_002[2];
+			a1P_010000002_2=2*a1P_010000002_1;
+			a2P_000000002_1=PD_002[2];
+			a1P_012000000_1=PD_012[0];
+			a1P_112000000_1=PD_112[0];
+			a1P_212000000_1=PD_212[0];
+			a3P_000010000_1=PD_010[1];
+			a3P_000010000_2=2*a3P_000010000_1;
+			a2P_011000000_1=PD_011[0];
+			a2P_000011000_1=PD_011[1];
+			a2P_000111000_1=PD_111[1];
+			a2P_000111000_2=2*a2P_000111000_1;
+			a1P_000012000_1=PD_012[1];
+			a1P_000112000_1=PD_112[1];
+			a1P_000212000_1=PD_212[1];
+			a1P_011010000_1=PD_011[0]*PD_010[1];
+			a1P_011000001_1=PD_011[0]*PD_001[2];
+			a1P_111010000_1=PD_111[0]*PD_010[1];
+			a1P_111000001_1=PD_111[0]*PD_001[2];
+			a2P_000010001_1=PD_010[1]*PD_001[2];
+			a2P_000010001_2=2*a2P_000010001_1;
+			a2P_000010001_4=4*a2P_000010001_1;
+			a1P_010011000_1=PD_010[0]*PD_011[1];
+			a1P_010111000_1=PD_010[0]*PD_111[1];
+			a1P_000011001_1=PD_011[1]*PD_001[2];
+			a1P_000111001_1=PD_111[1]*PD_001[2];
+			a1P_010010001_1=PD_010[0]*PD_010[1]*PD_001[2];
+			a1P_010010001_2=2*a1P_010010001_1;
+			a2P_010010000_1=PD_010[0]*PD_010[1];
+			a1P_000010002_1=PD_010[1]*PD_002[2];
+			a1P_000010002_2=2*a1P_000010002_1;
+			a1P_002010000_1=PD_002[0]*PD_010[1];
+			a1P_002010000_2=2*a1P_002010000_1;
+			a2P_002000000_1=PD_002[0];
+			a1P_001020000_1=PD_001[0]*PD_020[1];
+			a1P_001020000_2=2*a1P_001020000_1;
+			a2P_001010000_1=PD_001[0]*PD_010[1];
+			a2P_001010000_4=4*a2P_001010000_1;
+			a2P_001010000_2=2*a2P_001010000_1;
+			a3P_001000000_1=PD_001[0];
+			a3P_001000000_2=2*a3P_001000000_1;
+			a2P_000020000_1=PD_020[1];
+			a1P_000021000_1=PD_021[1];
+			a1P_000121000_1=PD_121[1];
+			a1P_000221000_1=PD_221[1];
+			a1P_001010001_1=PD_001[0]*PD_010[1]*PD_001[2];
+			a1P_001010001_2=2*a1P_001010001_1;
+			a2P_001000001_1=PD_001[0]*PD_001[2];
+			a1P_000020001_1=PD_020[1]*PD_001[2];
+			a1P_000020001_2=2*a1P_000020001_1;
+			a3P_000000010_1=PD_010[2];
+			a3P_000000010_2=2*a3P_000000010_1;
+			a1P_011001000_1=PD_011[0]*PD_001[1];
+			a1P_011000010_1=PD_011[0]*PD_010[2];
+			a1P_111001000_1=PD_111[0]*PD_001[1];
+			a1P_111000010_1=PD_111[0]*PD_010[2];
+			a2P_000001010_1=PD_001[1]*PD_010[2];
+			a2P_000001010_2=2*a2P_000001010_1;
+			a2P_000001010_4=4*a2P_000001010_1;
+			a1P_010001010_1=PD_010[0]*PD_001[1]*PD_010[2];
+			a1P_010001010_2=2*a1P_010001010_1;
+			a2P_010000010_1=PD_010[0]*PD_010[2];
+			a1P_000002010_1=PD_002[1]*PD_010[2];
+			a1P_000002010_2=2*a1P_000002010_1;
+			a2P_000000011_1=PD_011[2];
+			a2P_000000111_1=PD_111[2];
+			a2P_000000111_2=2*a2P_000000111_1;
+			a1P_010000011_1=PD_010[0]*PD_011[2];
+			a1P_010000111_1=PD_010[0]*PD_111[2];
+			a1P_000001011_1=PD_001[1]*PD_011[2];
+			a1P_000001111_1=PD_001[1]*PD_111[2];
+			a1P_000000012_1=PD_012[2];
+			a1P_000000112_1=PD_112[2];
+			a1P_000000212_1=PD_212[2];
+			a1P_002000010_1=PD_002[0]*PD_010[2];
+			a1P_002000010_2=2*a1P_002000010_1;
+			a1P_001010010_1=PD_001[0]*PD_010[1]*PD_010[2];
+			a1P_001010010_2=2*a1P_001010010_1;
+			a2P_001000010_1=PD_001[0]*PD_010[2];
+			a2P_001000010_2=2*a2P_001000010_1;
+			a2P_001000010_4=4*a2P_001000010_1;
+			a2P_000010010_1=PD_010[1]*PD_010[2];
+			a1P_001011000_1=PD_001[0]*PD_011[1];
+			a1P_001111000_1=PD_001[0]*PD_111[1];
+			a1P_000011010_1=PD_011[1]*PD_010[2];
+			a1P_000111010_1=PD_111[1]*PD_010[2];
+			a1P_001000011_1=PD_001[0]*PD_011[2];
+			a1P_001000111_1=PD_001[0]*PD_111[2];
+			a1P_000010011_1=PD_010[1]*PD_011[2];
+			a1P_000010111_1=PD_010[1]*PD_111[2];
+			a1P_001000020_1=PD_001[0]*PD_020[2];
+			a1P_001000020_2=2*a1P_001000020_1;
+			a2P_000000020_1=PD_020[2];
+			a1P_001001010_1=PD_001[0]*PD_001[1]*PD_010[2];
+			a1P_001001010_2=2*a1P_001001010_1;
+			a2P_001001000_1=PD_001[0]*PD_001[1];
+			a1P_000001020_1=PD_001[1]*PD_020[2];
+			a1P_000001020_2=2*a1P_000001020_1;
+			a1P_000000021_1=PD_021[2];
+			a1P_000000121_1=PD_121[2];
+			a1P_000000221_1=PD_221[2];
+			double PR_022000000000=P_022000000*R_000[0]+P_122000000*R_100[0]+P_222000000*R_200[0]+a2P_111000000_2*R_300[0]+R_400[0];
+			double PR_021001000000=P_021001000*R_000[0]+a1P_021000000_1*R_010[0]+P_121001000*R_100[0]+a1P_121000000_1*R_110[0]+P_221001000*R_200[0]+a1P_221000000_1*R_210[0]+a3P_000001000_1*R_300[0]+R_310[0];
+			double PR_020002000000=P_020002000*R_000[0]+a1P_020001000_2*R_010[0]+a2P_020000000_1*R_020[0]+a1P_010002000_2*R_100[0]+a2P_010001000_4*R_110[0]+a3P_010000000_2*R_120[0]+a2P_000002000_1*R_200[0]+a3P_000001000_2*R_210[0]+R_220[0];
+			double PR_021000001000=P_021000001*R_000[0]+a1P_021000000_1*R_001[0]+P_121000001*R_100[0]+a1P_121000000_1*R_101[0]+P_221000001*R_200[0]+a1P_221000000_1*R_201[0]+a3P_000000001_1*R_300[0]+R_301[0];
+			double PR_020001001000=P_020001001*R_000[0]+a1P_020001000_1*R_001[0]+a1P_020000001_1*R_010[0]+a2P_020000000_1*R_011[0]+a1P_010001001_2*R_100[0]+a2P_010001000_2*R_101[0]+a2P_010000001_2*R_110[0]+a3P_010000000_2*R_111[0]+a2P_000001001_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000001_1*R_210[0]+R_211[0];
+			double PR_020000002000=P_020000002*R_000[0]+a1P_020000001_2*R_001[0]+a2P_020000000_1*R_002[0]+a1P_010000002_2*R_100[0]+a2P_010000001_4*R_101[0]+a3P_010000000_2*R_102[0]+a2P_000000002_1*R_200[0]+a3P_000000001_2*R_201[0]+R_202[0];
+			double PR_012010000000=P_012010000*R_000[0]+a1P_012000000_1*R_010[0]+P_112010000*R_100[0]+a1P_112000000_1*R_110[0]+P_212010000*R_200[0]+a1P_212000000_1*R_210[0]+a3P_000010000_1*R_300[0]+R_310[0];
+			double PR_011011000000=P_011011000*R_000[0]+P_011111000*R_010[0]+a2P_011000000_1*R_020[0]+P_111011000*R_100[0]+P_111111000*R_110[0]+a2P_111000000_1*R_120[0]+a2P_000011000_1*R_200[0]+a2P_000111000_1*R_210[0]+R_220[0];
+			double PR_010012000000=P_010012000*R_000[0]+P_010112000*R_010[0]+P_010212000*R_020[0]+a3P_010000000_1*R_030[0]+a1P_000012000_1*R_100[0]+a1P_000112000_1*R_110[0]+a1P_000212000_1*R_120[0]+R_130[0];
+			double PR_011010001000=P_011010001*R_000[0]+a1P_011010000_1*R_001[0]+a1P_011000001_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111010001*R_100[0]+a1P_111010000_1*R_101[0]+a1P_111000001_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000010001_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000001_1*R_210[0]+R_211[0];
+			double PR_010011001000=P_010011001*R_000[0]+a1P_010011000_1*R_001[0]+P_010111001*R_010[0]+a1P_010111000_1*R_011[0]+a2P_010000001_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000011001_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111001_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000001_1*R_120[0]+R_121[0];
+			double PR_010010002000=P_010010002*R_000[0]+a1P_010010001_2*R_001[0]+a2P_010010000_1*R_002[0]+a1P_010000002_1*R_010[0]+a2P_010000001_2*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000010002_1*R_100[0]+a2P_000010001_2*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000002_1*R_110[0]+a3P_000000001_2*R_111[0]+R_112[0];
+			double PR_002020000000=P_002020000*R_000[0]+a1P_002010000_2*R_010[0]+a2P_002000000_1*R_020[0]+a1P_001020000_2*R_100[0]+a2P_001010000_4*R_110[0]+a3P_001000000_2*R_120[0]+a2P_000020000_1*R_200[0]+a3P_000010000_2*R_210[0]+R_220[0];
+			double PR_001021000000=P_001021000*R_000[0]+P_001121000*R_010[0]+P_001221000*R_020[0]+a3P_001000000_1*R_030[0]+a1P_000021000_1*R_100[0]+a1P_000121000_1*R_110[0]+a1P_000221000_1*R_120[0]+R_130[0];
+			double PR_000022000000=P_000022000*R_000[0]+P_000122000*R_010[0]+P_000222000*R_020[0]+a2P_000111000_2*R_030[0]+R_040[0];
+			double PR_001020001000=P_001020001*R_000[0]+a1P_001020000_1*R_001[0]+a1P_001010001_2*R_010[0]+a2P_001010000_2*R_011[0]+a2P_001000001_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000020001_1*R_100[0]+a2P_000020000_1*R_101[0]+a2P_000010001_2*R_110[0]+a3P_000010000_2*R_111[0]+a3P_000000001_1*R_120[0]+R_121[0];
+			double PR_000021001000=P_000021001*R_000[0]+a1P_000021000_1*R_001[0]+P_000121001*R_010[0]+a1P_000121000_1*R_011[0]+P_000221001*R_020[0]+a1P_000221000_1*R_021[0]+a3P_000000001_1*R_030[0]+R_031[0];
+			double PR_000020002000=P_000020002*R_000[0]+a1P_000020001_2*R_001[0]+a2P_000020000_1*R_002[0]+a1P_000010002_2*R_010[0]+a2P_000010001_4*R_011[0]+a3P_000010000_2*R_012[0]+a2P_000000002_1*R_020[0]+a3P_000000001_2*R_021[0]+R_022[0];
+			double PR_012000010000=P_012000010*R_000[0]+a1P_012000000_1*R_001[0]+P_112000010*R_100[0]+a1P_112000000_1*R_101[0]+P_212000010*R_200[0]+a1P_212000000_1*R_201[0]+a3P_000000010_1*R_300[0]+R_301[0];
+			double PR_011001010000=P_011001010*R_000[0]+a1P_011001000_1*R_001[0]+a1P_011000010_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111001010*R_100[0]+a1P_111001000_1*R_101[0]+a1P_111000010_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000001010_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000010_1*R_210[0]+R_211[0];
+			double PR_010002010000=P_010002010*R_000[0]+a1P_010002000_1*R_001[0]+a1P_010001010_2*R_010[0]+a2P_010001000_2*R_011[0]+a2P_010000010_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000002010_1*R_100[0]+a2P_000002000_1*R_101[0]+a2P_000001010_2*R_110[0]+a3P_000001000_2*R_111[0]+a3P_000000010_1*R_120[0]+R_121[0];
+			double PR_011000011000=P_011000011*R_000[0]+P_011000111*R_001[0]+a2P_011000000_1*R_002[0]+P_111000011*R_100[0]+P_111000111*R_101[0]+a2P_111000000_1*R_102[0]+a2P_000000011_1*R_200[0]+a2P_000000111_1*R_201[0]+R_202[0];
+			double PR_010001011000=P_010001011*R_000[0]+P_010001111*R_001[0]+a2P_010001000_1*R_002[0]+a1P_010000011_1*R_010[0]+a1P_010000111_1*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000001011_1*R_100[0]+a1P_000001111_1*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+R_112[0];
+			double PR_010000012000=P_010000012*R_000[0]+P_010000112*R_001[0]+P_010000212*R_002[0]+a3P_010000000_1*R_003[0]+a1P_000000012_1*R_100[0]+a1P_000000112_1*R_101[0]+a1P_000000212_1*R_102[0]+R_103[0];
+			double PR_002010010000=P_002010010*R_000[0]+a1P_002010000_1*R_001[0]+a1P_002000010_1*R_010[0]+a2P_002000000_1*R_011[0]+a1P_001010010_2*R_100[0]+a2P_001010000_2*R_101[0]+a2P_001000010_2*R_110[0]+a3P_001000000_2*R_111[0]+a2P_000010010_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000010_1*R_210[0]+R_211[0];
+			double PR_001011010000=P_001011010*R_000[0]+a1P_001011000_1*R_001[0]+P_001111010*R_010[0]+a1P_001111000_1*R_011[0]+a2P_001000010_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000011010_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111010_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000010_1*R_120[0]+R_121[0];
+			double PR_000012010000=P_000012010*R_000[0]+a1P_000012000_1*R_001[0]+P_000112010*R_010[0]+a1P_000112000_1*R_011[0]+P_000212010*R_020[0]+a1P_000212000_1*R_021[0]+a3P_000000010_1*R_030[0]+R_031[0];
+			double PR_001010011000=P_001010011*R_000[0]+P_001010111*R_001[0]+a2P_001010000_1*R_002[0]+a1P_001000011_1*R_010[0]+a1P_001000111_1*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000010011_1*R_100[0]+a1P_000010111_1*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+R_112[0];
+			double PR_000011011000=P_000011011*R_000[0]+P_000011111*R_001[0]+a2P_000011000_1*R_002[0]+P_000111011*R_010[0]+P_000111111*R_011[0]+a2P_000111000_1*R_012[0]+a2P_000000011_1*R_020[0]+a2P_000000111_1*R_021[0]+R_022[0];
+			double PR_000010012000=P_000010012*R_000[0]+P_000010112*R_001[0]+P_000010212*R_002[0]+a3P_000010000_1*R_003[0]+a1P_000000012_1*R_010[0]+a1P_000000112_1*R_011[0]+a1P_000000212_1*R_012[0]+R_013[0];
+			double PR_002000020000=P_002000020*R_000[0]+a1P_002000010_2*R_001[0]+a2P_002000000_1*R_002[0]+a1P_001000020_2*R_100[0]+a2P_001000010_4*R_101[0]+a3P_001000000_2*R_102[0]+a2P_000000020_1*R_200[0]+a3P_000000010_2*R_201[0]+R_202[0];
+			double PR_001001020000=P_001001020*R_000[0]+a1P_001001010_2*R_001[0]+a2P_001001000_1*R_002[0]+a1P_001000020_1*R_010[0]+a2P_001000010_2*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000001020_1*R_100[0]+a2P_000001010_2*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000020_1*R_110[0]+a3P_000000010_2*R_111[0]+R_112[0];
+			double PR_000002020000=P_000002020*R_000[0]+a1P_000002010_2*R_001[0]+a2P_000002000_1*R_002[0]+a1P_000001020_2*R_010[0]+a2P_000001010_4*R_011[0]+a3P_000001000_2*R_012[0]+a2P_000000020_1*R_020[0]+a3P_000000010_2*R_021[0]+R_022[0];
+			double PR_001000021000=P_001000021*R_000[0]+P_001000121*R_001[0]+P_001000221*R_002[0]+a3P_001000000_1*R_003[0]+a1P_000000021_1*R_100[0]+a1P_000000121_1*R_101[0]+a1P_000000221_1*R_102[0]+R_103[0];
+			double PR_000001021000=P_000001021*R_000[0]+P_000001121*R_001[0]+P_000001221*R_002[0]+a3P_000001000_1*R_003[0]+a1P_000000021_1*R_010[0]+a1P_000000121_1*R_011[0]+a1P_000000221_1*R_012[0]+R_013[0];
+			double PR_000000022000=P_000000022*R_000[0]+P_000000122*R_001[0]+P_000000222*R_002[0]+a2P_000000111_2*R_003[0]+R_004[0];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(PR_022000000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(PR_021001000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(PR_020002000000);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(PR_021000001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(PR_020001001000);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(PR_020000002000);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(PR_012010000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(PR_011011000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(PR_010012000000);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(PR_011010001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(PR_010011001000);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(PR_010010002000);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(PR_002020000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(PR_001021000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(PR_000022000000);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(PR_001020001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(PR_000021001000);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(PR_000020002000);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(PR_012000010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(PR_011001010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(PR_010002010000);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(PR_011000011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(PR_010001011000);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(PR_010000012000);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(PR_002010010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(PR_001011010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(PR_000012010000);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(PR_001010011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(PR_000011011000);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(PR_000010012000);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(PR_002000020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(PR_001001020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(PR_000002020000);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(PR_001000021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(PR_000001021000);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(PR_000000022000);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
+__global__ void TSMJ_Kq_ddss_fs(unsigned int contrc_bra_num,unsigned int contrc_ket_num,\
+                unsigned int * contrc_bra_id,\
+                unsigned int * contrc_ket_id,\
+                unsigned int mtrx_len,\
+                double * Pmtrx_in,\
+                double * P,\
+                double * PA,\
+                double * PB,\
+                double * Zta_in,\
+                double * pp_in,\
+                float * K2_p_in,\
+                unsigned int * id_bra_in,\
+                double * Q,\
+                double * QC,\
+                double * QD,\
+                double * Eta_in,\
+                double * pq_in,\
+                float * K2_q_in,\
+                unsigned int * id_ket_in,\
+                double * ans){
+
+    unsigned int tId_x = threadIdx.x;
+    unsigned int bId_x = blockIdx.x;
+    unsigned int bId_y = blockIdx.y;
+    unsigned int tdis = blockDim.x;
+    unsigned int bdis_x = gridDim.x;
+    unsigned int bdis_y = gridDim.y;
+    unsigned int ans_id=tId_x;
+    double Pmtrx[6]={0.0};
+
+    __shared__ double ans_temp[NTHREAD*6];
+    for(int i=0;i<6;i++){
+        ans_temp[i*tdis+tId_x]=0.0;
+    }
+
+    for(unsigned int i_contrc_bra=bId_x;i_contrc_bra<contrc_bra_num;i_contrc_bra+=bdis_x){
+    for(unsigned int j_contrc_ket=bId_y;j_contrc_ket<contrc_ket_num;j_contrc_ket+=bdis_y){
+    unsigned int primit_bra_start = contrc_bra_id[i_contrc_bra  ];
+    unsigned int primit_bra_end   = contrc_bra_id[i_contrc_bra+1];
+    unsigned int primit_ket_start = contrc_ket_id[j_contrc_ket  ];
+    unsigned int primit_ket_end   = contrc_ket_id[j_contrc_ket+1];
+        for(unsigned int ii=primit_bra_start;ii<primit_bra_end;ii++){
+            unsigned int id_bra=id_bra_in[ii];
+				double PX=P[ii*3+0];
+				double PY=P[ii*3+1];
+				double PZ=P[ii*3+2];
+				double PD_010[3];
+				PD_010[0]=PA[ii*3+0];
+				PD_010[1]=PA[ii*3+1];
+				PD_010[2]=PA[ii*3+2];
+				double PD_001[3];
+				PD_001[0]=PB[ii*3+0];
+				PD_001[1]=PB[ii*3+1];
+				PD_001[2]=PB[ii*3+2];
+				double Zta=Zta_in[ii];
+				double pp=pp_in[ii];
+            float K2_p=K2_p_in[ii];
+				double aPin1=1/(2*Zta);
+			double aPin2=aPin1*aPin1;
+			double aPin3=aPin1*aPin2;
+			double aPin4=aPin1*aPin3;
+        for(unsigned int j=tId_x;j<primit_ket_end-primit_ket_start;j+=tdis){
+            unsigned int jj=primit_ket_start+j;
+            unsigned int id_ket=tex1Dfetch(tex_id_ket,jj);
+            double P_max=0.0;
+            for(int p_j=0;p_j<1;p_j++){
+            for(int p_i=0;p_i<6;p_i++){
+                Pmtrx[p_i*1+p_j]=Pmtrx_in[(id_ket+p_j)*mtrx_len+(id_bra+p_i)];
+                double temp_P=fabsf(Pmtrx[p_i*1+p_j]);
+                if(temp_P>P_max) P_max=temp_P;
+            }
+            }
+            float K2_q=tex1Dfetch(tex_K2_q,jj);
+                if(fabsf(K2_p*K2_q)<1.0E-14){
+                    break;
+                }
+            if(fabsf(P_max*K2_p*K2_q)<1.0E-14) continue;
+            int2 temp_int2;
+            temp_int2=tex1Dfetch(tex_Eta,jj);
+            double Eta=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_pq,jj);
+            double pq=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+0);
+            double QX=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+1);
+            double QY=__hiloint2double(temp_int2.y,temp_int2.x);
+            temp_int2=tex1Dfetch(tex_Q,jj*3+2);
+            double QZ=__hiloint2double(temp_int2.y,temp_int2.x);
+                double alphaT=rsqrt(Eta+Zta);
+                double lmd=4*P25*pp*pq*alphaT;
+                alphaT=Eta*Zta*alphaT*alphaT;
+                double TX=PX-QX;
+                double TY=PY-QY;
+                double TZ=PZ-QZ;
+                double T=alphaT*(TX*TX+TY*TY+TZ*TZ);
+                double R_000[5];
+                Ft_fs_4(4,T,R_000);
+                R_000[0]*=lmd;
+                R_000[1]*=-2*alphaT*lmd;
+                R_000[2]*=4*alphaT*alphaT*lmd;
+                R_000[3]*=-8*alphaT*alphaT*alphaT*lmd;
+                R_000[4]*=16*alphaT*alphaT*alphaT*alphaT*lmd;
+	R_000[1]*=aPin1;
+	R_000[2]*=aPin2;
+	R_000[3]*=aPin3;
+	R_000[4]*=aPin4;
+	double R_100[4];
+	double R_200[3];
+	double R_300[2];
+	double R_400[1];
+	double R_010[4];
+	double R_110[3];
+	double R_210[2];
+	double R_310[1];
+	double R_020[3];
+	double R_120[2];
+	double R_220[1];
+	double R_030[2];
+	double R_130[1];
+	double R_040[1];
+	double R_001[4];
+	double R_101[3];
+	double R_201[2];
+	double R_301[1];
+	double R_011[3];
+	double R_111[2];
+	double R_211[1];
+	double R_021[2];
+	double R_121[1];
+	double R_031[1];
+	double R_002[3];
+	double R_102[2];
+	double R_202[1];
+	double R_012[2];
+	double R_112[1];
+	double R_022[1];
+	double R_003[2];
+	double R_103[1];
+	double R_013[1];
+	double R_004[1];
+	for(int i=0;i<4;i++){
+		R_100[i]=TX*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_010[i]=TY*R_000[i+1];
+	}
+	for(int i=0;i<4;i++){
+		R_001[i]=TZ*R_000[i+1];
+	}
+	for(int i=1;i<4;i++){
+		R_000[i]*=aPin1;
+	}
+	for(int i=0;i<3;i++){
+		R_200[i]=TX*R_100[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_110[i]=TX*R_010[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_020[i]=TY*R_010[i+1]+R_000[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_101[i]=TX*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_011[i]=TY*R_001[i+1];
+	}
+	for(int i=0;i<3;i++){
+		R_002[i]=TZ*R_001[i+1]+R_000[i+1];
+	}
+	for(int i=1;i<3;i++){
+		R_100[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_010[i]*=aPin1;
+	}
+	for(int i=1;i<3;i++){
+		R_001[i]*=aPin1;
+	}
+	for(int i=0;i<2;i++){
+		R_300[i]=TX*R_200[i+1]+2*R_100[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_210[i]=TY*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_120[i]=TX*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_030[i]=TY*R_020[i+1]+2*R_010[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_201[i]=TZ*R_200[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_111[i]=TX*R_011[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_021[i]=TZ*R_020[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_102[i]=TX*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_012[i]=TY*R_002[i+1];
+	}
+	for(int i=0;i<2;i++){
+		R_003[i]=TZ*R_002[i+1]+2*R_001[i+1];
+	}
+	for(int i=1;i<2;i++){
+		R_200[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_020[i]*=aPin1;
+	}
+	for(int i=1;i<2;i++){
+		R_002[i]*=aPin1;
+	}
+	for(int i=0;i<1;i++){
+		R_400[i]=TX*R_300[i+1]+3*R_200[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_310[i]=TY*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_220[i]=TX*R_120[i+1]+R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_130[i]=TX*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_040[i]=TY*R_030[i+1]+3*R_020[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_301[i]=TZ*R_300[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_211[i]=TY*R_201[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_121[i]=TX*R_021[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_031[i]=TZ*R_030[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_202[i]=TX*R_102[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_112[i]=TX*R_012[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_022[i]=TY*R_012[i+1]+R_002[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_103[i]=TX*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_013[i]=TY*R_003[i+1];
+	}
+	for(int i=0;i<1;i++){
+		R_004[i]=TZ*R_003[i+1]+3*R_002[i+1];
+	}
+		double PD_002[3];
+		double PD_102[3];
+		double PD_011[3];
+		double PD_111[3];
+		double PD_012[3];
+		double PD_112[3];
+		double PD_212[3];
+		double PD_020[3];
+		double PD_120[3];
+		double PD_021[3];
+		double PD_121[3];
+		double PD_221[3];
+		double PD_022[3];
+		double PD_122[3];
+		double PD_222[3];
+		for(int i=0;i<3;i++){
+			PD_002[i]=aPin1+PD_001[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_102[i]=(2.000000*PD_001[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_011[i]=aPin1+PD_010[i]*PD_001[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_111[i]=(PD_001[i]+PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_012[i]=PD_111[i]+PD_001[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_112[i]=(PD_002[i]+2.000000*PD_011[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_212[i]=(0.500000*PD_102[i]+PD_111[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_020[i]=aPin1+PD_010[i]*PD_010[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_120[i]=(2.000000*PD_010[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_021[i]=PD_111[i]+PD_010[i]*PD_011[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_121[i]=(2.000000*PD_011[i]+PD_020[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_221[i]=(PD_111[i]+0.500000*PD_120[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_022[i]=PD_112[i]+PD_010[i]*PD_012[i];
+			}
+		for(int i=0;i<3;i++){
+			PD_122[i]=2.000000*(PD_012[i]+PD_021[i]);
+			}
+		for(int i=0;i<3;i++){
+			PD_222[i]=(PD_112[i]+PD_121[i]);
+			}
+			double P_022000000;
+			double P_122000000;
+			double P_222000000;
+			double P_021001000;
+			double P_121001000;
+			double P_221001000;
+			double P_020002000;
+			double P_021000001;
+			double P_121000001;
+			double P_221000001;
+			double P_020001001;
+			double P_020000002;
+			double P_012010000;
+			double P_112010000;
+			double P_212010000;
+			double P_011011000;
+			double P_011111000;
+			double P_111011000;
+			double P_111111000;
+			double P_010012000;
+			double P_010112000;
+			double P_010212000;
+			double P_011010001;
+			double P_111010001;
+			double P_010011001;
+			double P_010111001;
+			double P_010010002;
+			double P_002020000;
+			double P_001021000;
+			double P_001121000;
+			double P_001221000;
+			double P_000022000;
+			double P_000122000;
+			double P_000222000;
+			double P_001020001;
+			double P_000021001;
+			double P_000121001;
+			double P_000221001;
+			double P_000020002;
+			double P_012000010;
+			double P_112000010;
+			double P_212000010;
+			double P_011001010;
+			double P_111001010;
+			double P_010002010;
+			double P_011000011;
+			double P_011000111;
+			double P_111000011;
+			double P_111000111;
+			double P_010001011;
+			double P_010001111;
+			double P_010000012;
+			double P_010000112;
+			double P_010000212;
+			double P_002010010;
+			double P_001011010;
+			double P_001111010;
+			double P_000012010;
+			double P_000112010;
+			double P_000212010;
+			double P_001010011;
+			double P_001010111;
+			double P_000011011;
+			double P_000011111;
+			double P_000111011;
+			double P_000111111;
+			double P_000010012;
+			double P_000010112;
+			double P_000010212;
+			double P_002000020;
+			double P_001001020;
+			double P_000002020;
+			double P_001000021;
+			double P_001000121;
+			double P_001000221;
+			double P_000001021;
+			double P_000001121;
+			double P_000001221;
+			double P_000000022;
+			double P_000000122;
+			double P_000000222;
+			double a2P_111000000_1;
+			double a2P_111000000_2;
+			double a1P_021000000_1;
+			double a1P_121000000_1;
+			double a1P_221000000_1;
+			double a3P_000001000_1;
+			double a3P_000001000_2;
+			double a1P_020001000_1;
+			double a1P_020001000_2;
+			double a2P_020000000_1;
+			double a1P_010002000_1;
+			double a1P_010002000_2;
+			double a2P_010001000_1;
+			double a2P_010001000_4;
+			double a2P_010001000_2;
+			double a3P_010000000_1;
+			double a3P_010000000_2;
+			double a2P_000002000_1;
+			double a3P_000000001_1;
+			double a3P_000000001_2;
+			double a1P_020000001_1;
+			double a1P_020000001_2;
+			double a1P_010001001_1;
+			double a1P_010001001_2;
+			double a2P_010000001_1;
+			double a2P_010000001_2;
+			double a2P_010000001_4;
+			double a2P_000001001_1;
+			double a1P_010000002_1;
+			double a1P_010000002_2;
+			double a2P_000000002_1;
+			double a1P_012000000_1;
+			double a1P_112000000_1;
+			double a1P_212000000_1;
+			double a3P_000010000_1;
+			double a3P_000010000_2;
+			double a2P_011000000_1;
+			double a2P_000011000_1;
+			double a2P_000111000_1;
+			double a2P_000111000_2;
+			double a1P_000012000_1;
+			double a1P_000112000_1;
+			double a1P_000212000_1;
+			double a1P_011010000_1;
+			double a1P_011000001_1;
+			double a1P_111010000_1;
+			double a1P_111000001_1;
+			double a2P_000010001_1;
+			double a2P_000010001_2;
+			double a2P_000010001_4;
+			double a1P_010011000_1;
+			double a1P_010111000_1;
+			double a1P_000011001_1;
+			double a1P_000111001_1;
+			double a1P_010010001_1;
+			double a1P_010010001_2;
+			double a2P_010010000_1;
+			double a1P_000010002_1;
+			double a1P_000010002_2;
+			double a1P_002010000_1;
+			double a1P_002010000_2;
+			double a2P_002000000_1;
+			double a1P_001020000_1;
+			double a1P_001020000_2;
+			double a2P_001010000_1;
+			double a2P_001010000_4;
+			double a2P_001010000_2;
+			double a3P_001000000_1;
+			double a3P_001000000_2;
+			double a2P_000020000_1;
+			double a1P_000021000_1;
+			double a1P_000121000_1;
+			double a1P_000221000_1;
+			double a1P_001010001_1;
+			double a1P_001010001_2;
+			double a2P_001000001_1;
+			double a1P_000020001_1;
+			double a1P_000020001_2;
+			double a3P_000000010_1;
+			double a3P_000000010_2;
+			double a1P_011001000_1;
+			double a1P_011000010_1;
+			double a1P_111001000_1;
+			double a1P_111000010_1;
+			double a2P_000001010_1;
+			double a2P_000001010_2;
+			double a2P_000001010_4;
+			double a1P_010001010_1;
+			double a1P_010001010_2;
+			double a2P_010000010_1;
+			double a1P_000002010_1;
+			double a1P_000002010_2;
+			double a2P_000000011_1;
+			double a2P_000000111_1;
+			double a2P_000000111_2;
+			double a1P_010000011_1;
+			double a1P_010000111_1;
+			double a1P_000001011_1;
+			double a1P_000001111_1;
+			double a1P_000000012_1;
+			double a1P_000000112_1;
+			double a1P_000000212_1;
+			double a1P_002000010_1;
+			double a1P_002000010_2;
+			double a1P_001010010_1;
+			double a1P_001010010_2;
+			double a2P_001000010_1;
+			double a2P_001000010_2;
+			double a2P_001000010_4;
+			double a2P_000010010_1;
+			double a1P_001011000_1;
+			double a1P_001111000_1;
+			double a1P_000011010_1;
+			double a1P_000111010_1;
+			double a1P_001000011_1;
+			double a1P_001000111_1;
+			double a1P_000010011_1;
+			double a1P_000010111_1;
+			double a1P_001000020_1;
+			double a1P_001000020_2;
+			double a2P_000000020_1;
+			double a1P_001001010_1;
+			double a1P_001001010_2;
+			double a2P_001001000_1;
+			double a1P_000001020_1;
+			double a1P_000001020_2;
+			double a1P_000000021_1;
+			double a1P_000000121_1;
+			double a1P_000000221_1;
+			P_022000000=PD_022[0];
+			P_122000000=PD_122[0];
+			P_222000000=PD_222[0];
+			P_021001000=PD_021[0]*PD_001[1];
+			P_121001000=PD_121[0]*PD_001[1];
+			P_221001000=PD_221[0]*PD_001[1];
+			P_020002000=PD_020[0]*PD_002[1];
+			P_021000001=PD_021[0]*PD_001[2];
+			P_121000001=PD_121[0]*PD_001[2];
+			P_221000001=PD_221[0]*PD_001[2];
+			P_020001001=PD_020[0]*PD_001[1]*PD_001[2];
+			P_020000002=PD_020[0]*PD_002[2];
+			P_012010000=PD_012[0]*PD_010[1];
+			P_112010000=PD_112[0]*PD_010[1];
+			P_212010000=PD_212[0]*PD_010[1];
+			P_011011000=PD_011[0]*PD_011[1];
+			P_011111000=PD_011[0]*PD_111[1];
+			P_111011000=PD_111[0]*PD_011[1];
+			P_111111000=PD_111[0]*PD_111[1];
+			P_010012000=PD_010[0]*PD_012[1];
+			P_010112000=PD_010[0]*PD_112[1];
+			P_010212000=PD_010[0]*PD_212[1];
+			P_011010001=PD_011[0]*PD_010[1]*PD_001[2];
+			P_111010001=PD_111[0]*PD_010[1]*PD_001[2];
+			P_010011001=PD_010[0]*PD_011[1]*PD_001[2];
+			P_010111001=PD_010[0]*PD_111[1]*PD_001[2];
+			P_010010002=PD_010[0]*PD_010[1]*PD_002[2];
+			P_002020000=PD_002[0]*PD_020[1];
+			P_001021000=PD_001[0]*PD_021[1];
+			P_001121000=PD_001[0]*PD_121[1];
+			P_001221000=PD_001[0]*PD_221[1];
+			P_000022000=PD_022[1];
+			P_000122000=PD_122[1];
+			P_000222000=PD_222[1];
+			P_001020001=PD_001[0]*PD_020[1]*PD_001[2];
+			P_000021001=PD_021[1]*PD_001[2];
+			P_000121001=PD_121[1]*PD_001[2];
+			P_000221001=PD_221[1]*PD_001[2];
+			P_000020002=PD_020[1]*PD_002[2];
+			P_012000010=PD_012[0]*PD_010[2];
+			P_112000010=PD_112[0]*PD_010[2];
+			P_212000010=PD_212[0]*PD_010[2];
+			P_011001010=PD_011[0]*PD_001[1]*PD_010[2];
+			P_111001010=PD_111[0]*PD_001[1]*PD_010[2];
+			P_010002010=PD_010[0]*PD_002[1]*PD_010[2];
+			P_011000011=PD_011[0]*PD_011[2];
+			P_011000111=PD_011[0]*PD_111[2];
+			P_111000011=PD_111[0]*PD_011[2];
+			P_111000111=PD_111[0]*PD_111[2];
+			P_010001011=PD_010[0]*PD_001[1]*PD_011[2];
+			P_010001111=PD_010[0]*PD_001[1]*PD_111[2];
+			P_010000012=PD_010[0]*PD_012[2];
+			P_010000112=PD_010[0]*PD_112[2];
+			P_010000212=PD_010[0]*PD_212[2];
+			P_002010010=PD_002[0]*PD_010[1]*PD_010[2];
+			P_001011010=PD_001[0]*PD_011[1]*PD_010[2];
+			P_001111010=PD_001[0]*PD_111[1]*PD_010[2];
+			P_000012010=PD_012[1]*PD_010[2];
+			P_000112010=PD_112[1]*PD_010[2];
+			P_000212010=PD_212[1]*PD_010[2];
+			P_001010011=PD_001[0]*PD_010[1]*PD_011[2];
+			P_001010111=PD_001[0]*PD_010[1]*PD_111[2];
+			P_000011011=PD_011[1]*PD_011[2];
+			P_000011111=PD_011[1]*PD_111[2];
+			P_000111011=PD_111[1]*PD_011[2];
+			P_000111111=PD_111[1]*PD_111[2];
+			P_000010012=PD_010[1]*PD_012[2];
+			P_000010112=PD_010[1]*PD_112[2];
+			P_000010212=PD_010[1]*PD_212[2];
+			P_002000020=PD_002[0]*PD_020[2];
+			P_001001020=PD_001[0]*PD_001[1]*PD_020[2];
+			P_000002020=PD_002[1]*PD_020[2];
+			P_001000021=PD_001[0]*PD_021[2];
+			P_001000121=PD_001[0]*PD_121[2];
+			P_001000221=PD_001[0]*PD_221[2];
+			P_000001021=PD_001[1]*PD_021[2];
+			P_000001121=PD_001[1]*PD_121[2];
+			P_000001221=PD_001[1]*PD_221[2];
+			P_000000022=PD_022[2];
+			P_000000122=PD_122[2];
+			P_000000222=PD_222[2];
+			a2P_111000000_1=PD_111[0];
+			a2P_111000000_2=2*a2P_111000000_1;
+			a1P_021000000_1=PD_021[0];
+			a1P_121000000_1=PD_121[0];
+			a1P_221000000_1=PD_221[0];
+			a3P_000001000_1=PD_001[1];
+			a3P_000001000_2=2*a3P_000001000_1;
+			a1P_020001000_1=PD_020[0]*PD_001[1];
+			a1P_020001000_2=2*a1P_020001000_1;
+			a2P_020000000_1=PD_020[0];
+			a1P_010002000_1=PD_010[0]*PD_002[1];
+			a1P_010002000_2=2*a1P_010002000_1;
+			a2P_010001000_1=PD_010[0]*PD_001[1];
+			a2P_010001000_4=4*a2P_010001000_1;
+			a2P_010001000_2=2*a2P_010001000_1;
+			a3P_010000000_1=PD_010[0];
+			a3P_010000000_2=2*a3P_010000000_1;
+			a2P_000002000_1=PD_002[1];
+			a3P_000000001_1=PD_001[2];
+			a3P_000000001_2=2*a3P_000000001_1;
+			a1P_020000001_1=PD_020[0]*PD_001[2];
+			a1P_020000001_2=2*a1P_020000001_1;
+			a1P_010001001_1=PD_010[0]*PD_001[1]*PD_001[2];
+			a1P_010001001_2=2*a1P_010001001_1;
+			a2P_010000001_1=PD_010[0]*PD_001[2];
+			a2P_010000001_2=2*a2P_010000001_1;
+			a2P_010000001_4=4*a2P_010000001_1;
+			a2P_000001001_1=PD_001[1]*PD_001[2];
+			a1P_010000002_1=PD_010[0]*PD_002[2];
+			a1P_010000002_2=2*a1P_010000002_1;
+			a2P_000000002_1=PD_002[2];
+			a1P_012000000_1=PD_012[0];
+			a1P_112000000_1=PD_112[0];
+			a1P_212000000_1=PD_212[0];
+			a3P_000010000_1=PD_010[1];
+			a3P_000010000_2=2*a3P_000010000_1;
+			a2P_011000000_1=PD_011[0];
+			a2P_000011000_1=PD_011[1];
+			a2P_000111000_1=PD_111[1];
+			a2P_000111000_2=2*a2P_000111000_1;
+			a1P_000012000_1=PD_012[1];
+			a1P_000112000_1=PD_112[1];
+			a1P_000212000_1=PD_212[1];
+			a1P_011010000_1=PD_011[0]*PD_010[1];
+			a1P_011000001_1=PD_011[0]*PD_001[2];
+			a1P_111010000_1=PD_111[0]*PD_010[1];
+			a1P_111000001_1=PD_111[0]*PD_001[2];
+			a2P_000010001_1=PD_010[1]*PD_001[2];
+			a2P_000010001_2=2*a2P_000010001_1;
+			a2P_000010001_4=4*a2P_000010001_1;
+			a1P_010011000_1=PD_010[0]*PD_011[1];
+			a1P_010111000_1=PD_010[0]*PD_111[1];
+			a1P_000011001_1=PD_011[1]*PD_001[2];
+			a1P_000111001_1=PD_111[1]*PD_001[2];
+			a1P_010010001_1=PD_010[0]*PD_010[1]*PD_001[2];
+			a1P_010010001_2=2*a1P_010010001_1;
+			a2P_010010000_1=PD_010[0]*PD_010[1];
+			a1P_000010002_1=PD_010[1]*PD_002[2];
+			a1P_000010002_2=2*a1P_000010002_1;
+			a1P_002010000_1=PD_002[0]*PD_010[1];
+			a1P_002010000_2=2*a1P_002010000_1;
+			a2P_002000000_1=PD_002[0];
+			a1P_001020000_1=PD_001[0]*PD_020[1];
+			a1P_001020000_2=2*a1P_001020000_1;
+			a2P_001010000_1=PD_001[0]*PD_010[1];
+			a2P_001010000_4=4*a2P_001010000_1;
+			a2P_001010000_2=2*a2P_001010000_1;
+			a3P_001000000_1=PD_001[0];
+			a3P_001000000_2=2*a3P_001000000_1;
+			a2P_000020000_1=PD_020[1];
+			a1P_000021000_1=PD_021[1];
+			a1P_000121000_1=PD_121[1];
+			a1P_000221000_1=PD_221[1];
+			a1P_001010001_1=PD_001[0]*PD_010[1]*PD_001[2];
+			a1P_001010001_2=2*a1P_001010001_1;
+			a2P_001000001_1=PD_001[0]*PD_001[2];
+			a1P_000020001_1=PD_020[1]*PD_001[2];
+			a1P_000020001_2=2*a1P_000020001_1;
+			a3P_000000010_1=PD_010[2];
+			a3P_000000010_2=2*a3P_000000010_1;
+			a1P_011001000_1=PD_011[0]*PD_001[1];
+			a1P_011000010_1=PD_011[0]*PD_010[2];
+			a1P_111001000_1=PD_111[0]*PD_001[1];
+			a1P_111000010_1=PD_111[0]*PD_010[2];
+			a2P_000001010_1=PD_001[1]*PD_010[2];
+			a2P_000001010_2=2*a2P_000001010_1;
+			a2P_000001010_4=4*a2P_000001010_1;
+			a1P_010001010_1=PD_010[0]*PD_001[1]*PD_010[2];
+			a1P_010001010_2=2*a1P_010001010_1;
+			a2P_010000010_1=PD_010[0]*PD_010[2];
+			a1P_000002010_1=PD_002[1]*PD_010[2];
+			a1P_000002010_2=2*a1P_000002010_1;
+			a2P_000000011_1=PD_011[2];
+			a2P_000000111_1=PD_111[2];
+			a2P_000000111_2=2*a2P_000000111_1;
+			a1P_010000011_1=PD_010[0]*PD_011[2];
+			a1P_010000111_1=PD_010[0]*PD_111[2];
+			a1P_000001011_1=PD_001[1]*PD_011[2];
+			a1P_000001111_1=PD_001[1]*PD_111[2];
+			a1P_000000012_1=PD_012[2];
+			a1P_000000112_1=PD_112[2];
+			a1P_000000212_1=PD_212[2];
+			a1P_002000010_1=PD_002[0]*PD_010[2];
+			a1P_002000010_2=2*a1P_002000010_1;
+			a1P_001010010_1=PD_001[0]*PD_010[1]*PD_010[2];
+			a1P_001010010_2=2*a1P_001010010_1;
+			a2P_001000010_1=PD_001[0]*PD_010[2];
+			a2P_001000010_2=2*a2P_001000010_1;
+			a2P_001000010_4=4*a2P_001000010_1;
+			a2P_000010010_1=PD_010[1]*PD_010[2];
+			a1P_001011000_1=PD_001[0]*PD_011[1];
+			a1P_001111000_1=PD_001[0]*PD_111[1];
+			a1P_000011010_1=PD_011[1]*PD_010[2];
+			a1P_000111010_1=PD_111[1]*PD_010[2];
+			a1P_001000011_1=PD_001[0]*PD_011[2];
+			a1P_001000111_1=PD_001[0]*PD_111[2];
+			a1P_000010011_1=PD_010[1]*PD_011[2];
+			a1P_000010111_1=PD_010[1]*PD_111[2];
+			a1P_001000020_1=PD_001[0]*PD_020[2];
+			a1P_001000020_2=2*a1P_001000020_1;
+			a2P_000000020_1=PD_020[2];
+			a1P_001001010_1=PD_001[0]*PD_001[1]*PD_010[2];
+			a1P_001001010_2=2*a1P_001001010_1;
+			a2P_001001000_1=PD_001[0]*PD_001[1];
+			a1P_000001020_1=PD_001[1]*PD_020[2];
+			a1P_000001020_2=2*a1P_000001020_1;
+			a1P_000000021_1=PD_021[2];
+			a1P_000000121_1=PD_121[2];
+			a1P_000000221_1=PD_221[2];
+			ans_temp[ans_id*6+0]+=Pmtrx[0]*(P_022000000*R_000[0]+P_122000000*R_100[0]+P_222000000*R_200[0]+a2P_111000000_2*R_300[0]+R_400[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[1]*(P_021001000*R_000[0]+a1P_021000000_1*R_010[0]+P_121001000*R_100[0]+a1P_121000000_1*R_110[0]+P_221001000*R_200[0]+a1P_221000000_1*R_210[0]+a3P_000001000_1*R_300[0]+R_310[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[2]*(P_020002000*R_000[0]+a1P_020001000_2*R_010[0]+a2P_020000000_1*R_020[0]+a1P_010002000_2*R_100[0]+a2P_010001000_4*R_110[0]+a3P_010000000_2*R_120[0]+a2P_000002000_1*R_200[0]+a3P_000001000_2*R_210[0]+R_220[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[3]*(P_021000001*R_000[0]+a1P_021000000_1*R_001[0]+P_121000001*R_100[0]+a1P_121000000_1*R_101[0]+P_221000001*R_200[0]+a1P_221000000_1*R_201[0]+a3P_000000001_1*R_300[0]+R_301[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[4]*(P_020001001*R_000[0]+a1P_020001000_1*R_001[0]+a1P_020000001_1*R_010[0]+a2P_020000000_1*R_011[0]+a1P_010001001_2*R_100[0]+a2P_010001000_2*R_101[0]+a2P_010000001_2*R_110[0]+a3P_010000000_2*R_111[0]+a2P_000001001_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000001_1*R_210[0]+R_211[0]);
+			ans_temp[ans_id*6+0]+=Pmtrx[5]*(P_020000002*R_000[0]+a1P_020000001_2*R_001[0]+a2P_020000000_1*R_002[0]+a1P_010000002_2*R_100[0]+a2P_010000001_4*R_101[0]+a3P_010000000_2*R_102[0]+a2P_000000002_1*R_200[0]+a3P_000000001_2*R_201[0]+R_202[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[0]*(P_012010000*R_000[0]+a1P_012000000_1*R_010[0]+P_112010000*R_100[0]+a1P_112000000_1*R_110[0]+P_212010000*R_200[0]+a1P_212000000_1*R_210[0]+a3P_000010000_1*R_300[0]+R_310[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[1]*(P_011011000*R_000[0]+P_011111000*R_010[0]+a2P_011000000_1*R_020[0]+P_111011000*R_100[0]+P_111111000*R_110[0]+a2P_111000000_1*R_120[0]+a2P_000011000_1*R_200[0]+a2P_000111000_1*R_210[0]+R_220[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[2]*(P_010012000*R_000[0]+P_010112000*R_010[0]+P_010212000*R_020[0]+a3P_010000000_1*R_030[0]+a1P_000012000_1*R_100[0]+a1P_000112000_1*R_110[0]+a1P_000212000_1*R_120[0]+R_130[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[3]*(P_011010001*R_000[0]+a1P_011010000_1*R_001[0]+a1P_011000001_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111010001*R_100[0]+a1P_111010000_1*R_101[0]+a1P_111000001_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000010001_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000001_1*R_210[0]+R_211[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[4]*(P_010011001*R_000[0]+a1P_010011000_1*R_001[0]+P_010111001*R_010[0]+a1P_010111000_1*R_011[0]+a2P_010000001_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000011001_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111001_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000001_1*R_120[0]+R_121[0]);
+			ans_temp[ans_id*6+1]+=Pmtrx[5]*(P_010010002*R_000[0]+a1P_010010001_2*R_001[0]+a2P_010010000_1*R_002[0]+a1P_010000002_1*R_010[0]+a2P_010000001_2*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000010002_1*R_100[0]+a2P_000010001_2*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000002_1*R_110[0]+a3P_000000001_2*R_111[0]+R_112[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[0]*(P_002020000*R_000[0]+a1P_002010000_2*R_010[0]+a2P_002000000_1*R_020[0]+a1P_001020000_2*R_100[0]+a2P_001010000_4*R_110[0]+a3P_001000000_2*R_120[0]+a2P_000020000_1*R_200[0]+a3P_000010000_2*R_210[0]+R_220[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[1]*(P_001021000*R_000[0]+P_001121000*R_010[0]+P_001221000*R_020[0]+a3P_001000000_1*R_030[0]+a1P_000021000_1*R_100[0]+a1P_000121000_1*R_110[0]+a1P_000221000_1*R_120[0]+R_130[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[2]*(P_000022000*R_000[0]+P_000122000*R_010[0]+P_000222000*R_020[0]+a2P_000111000_2*R_030[0]+R_040[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[3]*(P_001020001*R_000[0]+a1P_001020000_1*R_001[0]+a1P_001010001_2*R_010[0]+a2P_001010000_2*R_011[0]+a2P_001000001_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000020001_1*R_100[0]+a2P_000020000_1*R_101[0]+a2P_000010001_2*R_110[0]+a3P_000010000_2*R_111[0]+a3P_000000001_1*R_120[0]+R_121[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[4]*(P_000021001*R_000[0]+a1P_000021000_1*R_001[0]+P_000121001*R_010[0]+a1P_000121000_1*R_011[0]+P_000221001*R_020[0]+a1P_000221000_1*R_021[0]+a3P_000000001_1*R_030[0]+R_031[0]);
+			ans_temp[ans_id*6+2]+=Pmtrx[5]*(P_000020002*R_000[0]+a1P_000020001_2*R_001[0]+a2P_000020000_1*R_002[0]+a1P_000010002_2*R_010[0]+a2P_000010001_4*R_011[0]+a3P_000010000_2*R_012[0]+a2P_000000002_1*R_020[0]+a3P_000000001_2*R_021[0]+R_022[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[0]*(P_012000010*R_000[0]+a1P_012000000_1*R_001[0]+P_112000010*R_100[0]+a1P_112000000_1*R_101[0]+P_212000010*R_200[0]+a1P_212000000_1*R_201[0]+a3P_000000010_1*R_300[0]+R_301[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[1]*(P_011001010*R_000[0]+a1P_011001000_1*R_001[0]+a1P_011000010_1*R_010[0]+a2P_011000000_1*R_011[0]+P_111001010*R_100[0]+a1P_111001000_1*R_101[0]+a1P_111000010_1*R_110[0]+a2P_111000000_1*R_111[0]+a2P_000001010_1*R_200[0]+a3P_000001000_1*R_201[0]+a3P_000000010_1*R_210[0]+R_211[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[2]*(P_010002010*R_000[0]+a1P_010002000_1*R_001[0]+a1P_010001010_2*R_010[0]+a2P_010001000_2*R_011[0]+a2P_010000010_1*R_020[0]+a3P_010000000_1*R_021[0]+a1P_000002010_1*R_100[0]+a2P_000002000_1*R_101[0]+a2P_000001010_2*R_110[0]+a3P_000001000_2*R_111[0]+a3P_000000010_1*R_120[0]+R_121[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[3]*(P_011000011*R_000[0]+P_011000111*R_001[0]+a2P_011000000_1*R_002[0]+P_111000011*R_100[0]+P_111000111*R_101[0]+a2P_111000000_1*R_102[0]+a2P_000000011_1*R_200[0]+a2P_000000111_1*R_201[0]+R_202[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[4]*(P_010001011*R_000[0]+P_010001111*R_001[0]+a2P_010001000_1*R_002[0]+a1P_010000011_1*R_010[0]+a1P_010000111_1*R_011[0]+a3P_010000000_1*R_012[0]+a1P_000001011_1*R_100[0]+a1P_000001111_1*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+R_112[0]);
+			ans_temp[ans_id*6+3]+=Pmtrx[5]*(P_010000012*R_000[0]+P_010000112*R_001[0]+P_010000212*R_002[0]+a3P_010000000_1*R_003[0]+a1P_000000012_1*R_100[0]+a1P_000000112_1*R_101[0]+a1P_000000212_1*R_102[0]+R_103[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[0]*(P_002010010*R_000[0]+a1P_002010000_1*R_001[0]+a1P_002000010_1*R_010[0]+a2P_002000000_1*R_011[0]+a1P_001010010_2*R_100[0]+a2P_001010000_2*R_101[0]+a2P_001000010_2*R_110[0]+a3P_001000000_2*R_111[0]+a2P_000010010_1*R_200[0]+a3P_000010000_1*R_201[0]+a3P_000000010_1*R_210[0]+R_211[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[1]*(P_001011010*R_000[0]+a1P_001011000_1*R_001[0]+P_001111010*R_010[0]+a1P_001111000_1*R_011[0]+a2P_001000010_1*R_020[0]+a3P_001000000_1*R_021[0]+a1P_000011010_1*R_100[0]+a2P_000011000_1*R_101[0]+a1P_000111010_1*R_110[0]+a2P_000111000_1*R_111[0]+a3P_000000010_1*R_120[0]+R_121[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[2]*(P_000012010*R_000[0]+a1P_000012000_1*R_001[0]+P_000112010*R_010[0]+a1P_000112000_1*R_011[0]+P_000212010*R_020[0]+a1P_000212000_1*R_021[0]+a3P_000000010_1*R_030[0]+R_031[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[3]*(P_001010011*R_000[0]+P_001010111*R_001[0]+a2P_001010000_1*R_002[0]+a1P_001000011_1*R_010[0]+a1P_001000111_1*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000010011_1*R_100[0]+a1P_000010111_1*R_101[0]+a3P_000010000_1*R_102[0]+a2P_000000011_1*R_110[0]+a2P_000000111_1*R_111[0]+R_112[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[4]*(P_000011011*R_000[0]+P_000011111*R_001[0]+a2P_000011000_1*R_002[0]+P_000111011*R_010[0]+P_000111111*R_011[0]+a2P_000111000_1*R_012[0]+a2P_000000011_1*R_020[0]+a2P_000000111_1*R_021[0]+R_022[0]);
+			ans_temp[ans_id*6+4]+=Pmtrx[5]*(P_000010012*R_000[0]+P_000010112*R_001[0]+P_000010212*R_002[0]+a3P_000010000_1*R_003[0]+a1P_000000012_1*R_010[0]+a1P_000000112_1*R_011[0]+a1P_000000212_1*R_012[0]+R_013[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[0]*(P_002000020*R_000[0]+a1P_002000010_2*R_001[0]+a2P_002000000_1*R_002[0]+a1P_001000020_2*R_100[0]+a2P_001000010_4*R_101[0]+a3P_001000000_2*R_102[0]+a2P_000000020_1*R_200[0]+a3P_000000010_2*R_201[0]+R_202[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[1]*(P_001001020*R_000[0]+a1P_001001010_2*R_001[0]+a2P_001001000_1*R_002[0]+a1P_001000020_1*R_010[0]+a2P_001000010_2*R_011[0]+a3P_001000000_1*R_012[0]+a1P_000001020_1*R_100[0]+a2P_000001010_2*R_101[0]+a3P_000001000_1*R_102[0]+a2P_000000020_1*R_110[0]+a3P_000000010_2*R_111[0]+R_112[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[2]*(P_000002020*R_000[0]+a1P_000002010_2*R_001[0]+a2P_000002000_1*R_002[0]+a1P_000001020_2*R_010[0]+a2P_000001010_4*R_011[0]+a3P_000001000_2*R_012[0]+a2P_000000020_1*R_020[0]+a3P_000000010_2*R_021[0]+R_022[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[3]*(P_001000021*R_000[0]+P_001000121*R_001[0]+P_001000221*R_002[0]+a3P_001000000_1*R_003[0]+a1P_000000021_1*R_100[0]+a1P_000000121_1*R_101[0]+a1P_000000221_1*R_102[0]+R_103[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[4]*(P_000001021*R_000[0]+P_000001121*R_001[0]+P_000001221*R_002[0]+a3P_000001000_1*R_003[0]+a1P_000000021_1*R_010[0]+a1P_000000121_1*R_011[0]+a1P_000000221_1*R_012[0]+R_013[0]);
+			ans_temp[ans_id*6+5]+=Pmtrx[5]*(P_000000022*R_000[0]+P_000000122*R_001[0]+P_000000222*R_002[0]+a2P_000000111_2*R_003[0]+R_004[0]);
+		}
+		}
+        __syncthreads();
+        int num_thread=NTHREAD/2;
+        while (num_thread!=0){
+            __syncthreads();
+            if(tId_x<num_thread){
+                for(int ians=0;ians<6;ians++){
+                    ans_temp[tId_x*6+ians]+=ans_temp[(tId_x+num_thread)*6+ians];
+                }
+            }
+            num_thread/=2;
+        }
+        if(tId_x==0){
+            for(int ians=0;ians<6;ians++){
+                ans[(i_contrc_bra*contrc_ket_num+j_contrc_ket)*6+ians]=ans_temp[(tId_x)*6+ians];
+            }
+        }
+	}
+	}
+}
